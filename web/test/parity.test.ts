@@ -12,6 +12,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import { fileAccess, writeZip } from '../cli/node-io.ts';
+import { listZip, readEntry } from '../src/core/zip.ts';
 import { repo, tempDir } from './helpers.ts';
 
 // GRIDANON_DOTNET points at a .NET edition binary; a sibling ../dotnet checkout is picked up too.
@@ -45,3 +47,33 @@ for (const cfg of configs) {
     assert.deepEqual(b.psse, a.psse);
   });
 }
+
+// Zip bundles: both editions read a zip written by the TypeScript writer, and the
+// entries of their output zips are identical (the zip bytes themselves differ).
+test('parity [zip bundle]', { skip: !dotnet && 'no .NET gridanon binary (set GRIDANON_DOTNET)' }, async () => {
+  const t = tempDir();
+  const psse = join(repo, 'samples/psse');
+  const bundle = t.file('meridian.zip');
+  await writeZip(bundle, readdirSync(psse).sort().map((n) => ({ entryName: (n.endsWith('.raw') ? 'case/' : 'study/') + n, filePath: join(psse, n) })));
+  const common = ['anonymize', bundle, '--salt', 'parity', '-q', '--renumber-buses'];
+  const net = spawnSync(dotnet!, [...common, '-o', t.file('net')], { encoding: 'utf8' });
+  const ts = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', tsCli, ...common, '-o', t.file('ts')], { encoding: 'utf8' });
+  assert.equal(ts.status, net.status, `exit codes differ: ${net.stderr} ${ts.stderr}`);
+  const contents = async (zip: string) => {
+    const access = await fileAccess(zip);
+    try {
+      const result: Record<string, string> = {};
+      for (const e of await listZip(access)) {
+        const parts: Uint8Array[] = [];
+        for await (const c of readEntry(access, e)) parts.push(c);
+        result[e.path] = Buffer.concat(parts).toString('base64');
+      }
+      return result;
+    } finally {
+      await access.close();
+    }
+  };
+  const a = await contents(t.file('net/meridian_anonymized.zip'));
+  assert.equal(Object.keys(a).length, readdirSync(psse).length);
+  assert.deepEqual(await contents(t.file('ts/meridian_anonymized.zip')), a);
+});

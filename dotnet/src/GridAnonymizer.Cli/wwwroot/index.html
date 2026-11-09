@@ -7,8 +7,8 @@
 <meta name="color-scheme" content="light dark" />
 <title>GridAnonymizer</title>
 <meta name="description" content="Anonymize CIM/CGMES and PSS/E network models. Names, ids and bus numbers are replaced; electrical data is kept exactly. Nothing leaves your computer." />
-  <script type="module" crossorigin src="./assets/index-icOFMY1c.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-BBOyBzQe.css">
+  <script type="module" crossorigin src="./assets/index-BxK_y5Vz.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BSq1L7fV.css">
 </head>
 <body>
 <header class="top">
@@ -37,12 +37,18 @@
     <div id="drop" class="drop" tabindex="0" role="button" aria-describedby="drop-hint">
       <svg class="drop-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 31V11m0 0-8 8m8-8 8 8M10 30v6a2 2 0 0 0 2 2h24a2 2 0 0 0 2-2v-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <p class="drop-title" id="drop-title">Drop model files</p>
-      <p class="drop-hint" id="drop-hint">CIM/CGMES, PSS®E RAW and companion CSVs</p>
+      <p class="drop-hint" id="drop-hint">CIM/CGMES, PSS®E .raw with its .con .mon .sub files, CSVs, or one .zip of them</p>
       <input id="picker" type="file" multiple hidden />
     </div>
     <p class="sample-line" id="sample-line">No files to hand? <button type="button" class="link" data-sample="all">Try the sample set</button></p>
 
     <ul id="files" class="files" hidden aria-label="Files"></ul>
+
+    <div id="psse-set" class="psse-set" hidden>
+      <p class="psse-title" data-help="psse-set">PSS®E set</p>
+      <div id="psse-chips" class="chips"></div>
+      <p id="psse-note" class="hint"></p>
+    </div>
 
     <div id="restore-mapping" class="field-inline" hidden>
       <label for="mapping-in" data-help="restore-mapping">Mapping file</label>
@@ -172,14 +178,17 @@
   </div>
   <div class="help-body">
     <ol class="steps">
-      <li><strong>Drop your model files</strong> on the Anonymize tab. Add the files that belong together in one go, such as every profile of a CGMES set, several cases of one PSS®E system, or the CSVs that go with them, so they get the same pseudonyms.</li>
+      <li><strong>Drop your model files</strong> on the Anonymize tab, as files or as one .zip. Add the files that belong together in one go, such as every profile of a CGMES set, a PSS®E case with its .con, .mon and .sub files, or the CSVs that go with them, so they get the same pseudonyms.</li>
       <li><strong>Check the format</strong> shown next to each file, and pick a profile. The Standard profile suits most sharing.</li>
       <li><strong>Press Anonymize</strong>, then read the verdict. Green means the audit found nothing identifying in the output. Red means don't share that file; open <em>Details</em> to see what was found.</li>
-      <li><strong>Download</strong> the files, and the mapping if you'll need to read the vendor's results later.</li>
+      <li><strong>Download</strong> the files, or all of them as one zip with the original names and folders inside, and the mapping if you'll need to read the vendor's results later.</li>
     </ol>
 
     <h3>What changes and what stays</h3>
     <p>Replaced: names, ids, mRIDs, descriptions, comments, model headers, PSS®E case titles, coordinates and addresses, and optionally bus numbers. Kept exactly: topology, impedances, ratings, switch states, kV levels and shared labels such as <code>MW</code> or <code>High1</code>.</p>
+
+    <h3>PSS®E sets</h3>
+    <p>A case (.raw) can come with contingencies (.con), monitored elements (.mon), subsystems (.sub) and other auxiliary files. Only the case is needed. Drop them together and the companions follow it: renumbered buses, bus names and labels such as contingency names match across the set. The panel under the file list shows which parts are there and adds a missing one in a click.</p>
 
     <h3>Salt or mapping?</h3>
     <p>Both make pseudonyms repeatable. The <strong>salt</strong> is a secret word: the same salt and the same files give the same output. The <strong>mapping</strong> is the full list of original-to-pseudonym pairs. Use it to restore results, or to continue with the next revision of a model. Keep both private; anyone holding the mapping can undo everything.</p>

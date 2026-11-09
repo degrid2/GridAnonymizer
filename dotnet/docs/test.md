@@ -5,7 +5,7 @@
 From this folder:
 
 ```bash
-dotnet test                         # 38 tests
+dotnet test                         # 57 tests
 dotnet format --verify-no-changes   # style; CI enforces it (warnings are errors)
 ```
 
@@ -13,8 +13,10 @@ dotnet format --verify-no-changes   # style; CI enforces it (warnings are errors
 |---|---|
 | CIM | byte-identical to the original v1 tool (`tests/golden`), chunk boundaries, multi-profile CGMES sets, boundary-set references, coordinates, redact terms, refusing CDATA and single-quoted attributes, restore round trip, mapping continuation, id shapes |
 | PSS®E | v33 and v35 names, titles and comments; renumbering in every bus-reference field; shuffled vs sequential; substation coordinates; two cases of one system; refusing unsafe renumbering; restore round trip; preserve patterns; tokenizer; line endings |
+| PSS®E companions | `.con`/`.mon`/`.sub` follow the renumbered case; bus ranges expanded; labels consistent and reaching result CSVs; restore; missing-bus and missing-case warnings |
+| Zip | entry names normalized; zip slip refused; extract and write round trip |
 | Text | companion CSV gets the same pseudonyms and restores exactly |
-| UI server | serves the embedded page with a loopback-only CSP; refuses a missing token, a foreign `Origin` and a foreign `Host`; upload → detect → run → download returns exactly the engine's output |
+| UI server | serves the embedded page with a loopback-only CSP; refuses a missing token, a foreign `Origin` and a foreign `Host`; upload → detect → run → download returns exactly the engine's output; a zipped set keeps its layout and comes back as one zip; paths cannot escape the output folder |
 
 ## Test the native binary
 
@@ -25,7 +27,7 @@ dotnet publish src/GridAnonymizer.Cli -c Release -r win-x64 -o out      # your r
 fc samples\psse\study_results.csv back\study_results_anonymized_restored.csv    # Windows; Linux/macOS: diff
 ```
 
-Expect five `audit: clean` lines, exit code `0`, and "no differences" from `fc`/`diff`.
+Expect eight `audit: clean` lines, exit code `0`, and "no differences" from `fc`/`diff`.
 
 ## Manual walkthrough (about 5 minutes)
 
@@ -57,7 +59,7 @@ The kept comment "Meridian downtown feeders" names the owner. Add `--redact Meri
 
 1. `gridanon ui -o out-ui`
 2. **Settings:** type `Meridian` under *Terms that must not survive*.
-3. **Anonymize:** *Try the sample set*, turn on *Renumber buses* and *Save mapping*, and press **Anonymize 5 files**. Expect "All 5 files are clean", with the files in `out-ui\`.
+3. **Anonymize:** *Try the sample set*, turn on *Renumber buses* and *Save mapping*, and press **Anonymize 8 files**. Expect "All 8 files are clean", with the files in `out-ui\`, and *Download all as gridanon_anonymized.zip* below the list. The **PSS®E set** panel shows Case ×2, Contingencies, Monitored elements and Subsystems.
 4. **Download mapping**, then **Start over**. **Restore:** drop `out-ui\study_results_anonymized.csv`, choose the mapping, and press **Restore**. The result is the original CSV.
 
 ## Testing with your own models

@@ -22,6 +22,14 @@ public interface IFormatHandler
     bool Sniff(string head);
 
     IFormatJob CreateJob(JobContext context);
+
+    /// <summary>
+    /// When this format runs. 0: models that define names (CIM, PSS/E RAW).
+    /// 1: files that follow a model in the same run (PSS/E .con/.mon/.sub/.aux).
+    /// 2: free text that only reuses names already mapped.
+    /// Formats with a phase above 0 see the run's mapping so far.
+    /// </summary>
+    int Phase => 0;
 }
 
 /// <summary>

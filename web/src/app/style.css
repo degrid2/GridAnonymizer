@@ -105,6 +105,19 @@ h1 { margin: 0; font-size: 22px; line-height: 1.15; font-weight: 700; letter-spa
 .files .size { color: var(--muted); font-size: 13px; min-width: 56px; text-align: right; }
 .files select { padding: 3px 26px 3px 8px; font-size: 13px; }
 .files li.skipped .name { color: var(--muted); text-decoration: line-through; }
+/* PSS®E set: which parts are there, and the missing ones one click away */
+.files .from { color: var(--muted); font-weight: 450; }
+.psse-set { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); display: grid; gap: 8px; }
+.psse-title { margin: 0; font-weight: 650; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 13px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); }
+.chip.on { border-color: color-mix(in srgb, var(--clean) 45%, var(--line)); background: var(--clean-bg); color: var(--clean); font-weight: 600; }
+.chip.on small { font-weight: 500; }
+.chip .tick { font-size: 12px; }
+.chip.add { border-style: dashed; color: var(--muted); cursor: pointer; }
+.chip.add:hover { border-color: var(--accent); color: var(--accent); }
+.chip.add.need { border-color: var(--warn); color: var(--warn); }
+a.secondary.strong { border-color: var(--accent); color: var(--accent); }
 .remove { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 6px; border-radius: 6px; }
 .remove:hover { color: var(--ink); background: var(--line); }
 

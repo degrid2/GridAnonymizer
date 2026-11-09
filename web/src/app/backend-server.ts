@@ -67,6 +67,7 @@ export async function serverBackend(): Promise<Backend> {
               if (!line) continue;
               const msg = JSON.parse(line) as WorkerOut;
               if (msg.type === 'file-done' && msg.file?.url) msg.file.url += `?t=${encodeURIComponent(token)}`;
+              if (msg.type === 'done' && msg.zip?.url) msg.zip.url += `?t=${encodeURIComponent(token)}`;
               onMessage(msg);
             }
           }

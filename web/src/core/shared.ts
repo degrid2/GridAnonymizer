@@ -250,6 +250,8 @@ export interface FormatHandler {
   readonly description: string;
   readonly extensions: readonly string[];
   readonly encoding: TextEncoding;
+  /** Run order: 0 models, 1 PSS/E companions, 2 plain text. Phases above 0 see the run's mapping so far. */
+  readonly phase?: number;
   sniff(head: string): boolean;
   createJob(ctx: JobContext): FormatJob;
 }

@@ -7,6 +7,7 @@
  *   - every result card shows a passed audit
  *   - downloaded outputs are byte-identical to the Node CLI's
  *   - the page made no network request and raised no CSP violation
+ *   - a dropped .zip comes back as one zip whose entries match the CLI's
  * Needs: npm i -D playwright && npx playwright install chromium
  */
 import { spawn, spawnSync } from 'node:child_process';
@@ -15,6 +16,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
+import { fileAccess, writeZip } from '../cli/node-io.ts';
+import { listZip, readEntry } from '../src/core/zip.ts';
 
 const web = join(dirname(fileURLToPath(import.meta.url)), '..');
 const repo = web;
@@ -23,10 +26,33 @@ const fail = (m) => { console.error('FAIL: ' + m); process.exitCode = 1; };
 
 // Reference outputs from the Node CLI with the same salt.
 // Same file order as the page's "everything" sample: files of one format share a job, and order sets name numbering.
-const samples = ['cim/sample-network.xml', 'cim/cgmes_eq_uuid.xml', 'psse/meridian_v33.raw', 'psse/meridian_v35.raw', 'psse/study_results.csv'];
+const samples = ['cim/sample-network.xml', 'cim/cgmes_eq_uuid.xml', 'psse/meridian_v33.raw', 'psse/meridian_v35.raw',
+  'psse/meridian_v33.con', 'psse/meridian_v33.mon', 'psse/meridian_v33.sub', 'psse/study_results.csv'];
 const cli = spawnSync(process.execPath, ['dist-cli/gridanon.mjs', 'anonymize', ...samples.map((s) => join(repo, 'samples', s)),
   '--salt', 'smoke', '-o', join(work, 'cli'), '-q'], { cwd: web, encoding: 'utf8' });
 if (cli.status !== 0) fail('CLI run failed: ' + cli.stderr);
+
+// A PSS/E set as one zip, with folders; the CLI's answer for it.
+const psseNames = ['meridian_v33.raw', 'meridian_v33.con', 'meridian_v33.mon', 'meridian_v33.sub', 'study_results.csv'];
+const bundle = join(work, 'meridian.zip');
+await writeZip(bundle, psseNames.map((n) => ({ entryName: (n.endsWith('.raw') ? 'case/' : 'study/') + n, filePath: join(repo, 'samples/psse', n) })));
+const cliZip = spawnSync(process.execPath, ['dist-cli/gridanon.mjs', 'anonymize', bundle, '--salt', 'smoke', '--renumber-buses', '-o', join(work, 'cli-zip'), '-q'], { cwd: web, encoding: 'utf8' });
+if (cliZip.status !== 0) fail('CLI zip run failed: ' + cliZip.stderr);
+async function zipContents(zip) {
+  const access = await fileAccess(zip);
+  try {
+    const out = {};
+    for (const e of await listZip(access)) {
+      const parts = [];
+      for await (const c of readEntry(access, e)) parts.push(c);
+      out[e.path] = Buffer.concat(parts).toString('base64');
+    }
+    return out;
+  } finally {
+    await access.close();
+  }
+}
+const expectedZip = await zipContents(join(work, 'cli-zip/meridian_anonymized.zip'));
 
 const server = spawn(process.execPath, ['server.mjs'], { cwd: web, env: { ...process.env, PORT: '18731' } });
 await new Promise((r) => setTimeout(r, 800));
@@ -70,7 +96,7 @@ try {
     await page.click('#run');
     await page.waitForSelector('.verdict', { timeout: 30000 });
     const rows = await page.$$eval('.result', (els) => els.map((e) => e.getAttribute('data-clean')));
-    if (rows.length !== 5 || rows.some((c) => c !== 'true')) fail(`${label}: audits ${JSON.stringify(rows)}`);
+    if (rows.length !== samples.length || rows.some((c) => c !== 'true')) fail(`${label}: audits ${JSON.stringify(rows)}`);
 
     // Download every output and compare with the CLI.
     const links = await page.$$('.result a.download');
@@ -98,6 +124,27 @@ try {
     await restored.saveAs(restoredPath);
     if (!readFileSync(restoredPath).equals(readFileSync(join(repo, 'samples/psse/study_results.csv')))) fail(`${label}: restore did not reproduce the original CSV`);
 
+    // A zipped PSS/E set: the set panel, then one zip back with the same layout.
+    await page.click('#start-over');
+    await page.click('#tab-settings');
+    await page.check('#renumber-settings', { force: true });
+    await page.click('#tab-anonymize');
+    await page.setInputFiles('#picker', bundle);
+    await page.waitForSelector('#psse-set:not([hidden]) .chip');
+    const chips = await page.$$eval('#psse-chips .chip', (els) => els.map((e) => e.className));
+    if (chips.filter((c) => c.includes('on')).length !== 4 || chips.length !== 5) fail(`${label}: PSS/E set panel ${JSON.stringify(chips)}`);
+    await page.click('#run');
+    await page.waitForSelector('#dl-zip', { timeout: 30000 });
+    // Chromium sometimes drops the first download a page starts after several others: click again if so.
+    let zipDl;
+    for (let attempt = 0; attempt < 3 && !zipDl; attempt++)
+      [zipDl] = await Promise.all([page.waitForEvent('download', { timeout: 5000 }).catch(() => undefined), page.click('#dl-zip')]);
+    if (!zipDl) throw new Error(`${label}: the zip did not download`);
+    if (zipDl.suggestedFilename() !== 'meridian_anonymized.zip') fail(`${label}: zip named ${zipDl.suggestedFilename()}`);
+    const zipPath = join(work, label.replace(/\W/g, '_') + '_bundle.zip');
+    await zipDl.saveAs(zipPath);
+    if (JSON.stringify(await zipContents(zipPath)) !== JSON.stringify(expectedZip)) fail(`${label}: the zip's entries differ from the CLI's`);
+
     const after = requests.slice(initialRequests);
     if (label.startsWith('.NET')) {
       // The .NET page talks to its own loopback server, and to nothing else.
@@ -106,7 +153,7 @@ try {
       if (foreign.length) fail(`${label}: requests to other origins: ${foreign.join(', ')}`);
     } else if (after.length) fail(`${label}: network requests after load: ${after.join(', ')}`);
     if (problems.length) fail(`${label}: console errors: ${problems.join(' | ')}`);
-    if (!process.exitCode) console.log(`${label}: ${links.length} outputs identical to the CLI, audits passed, restore round-trips, ` +
+    if (!process.exitCode) console.log(`${label}: ${links.length} outputs identical to the CLI, audits passed, restore round-trips, the zipped set matches, ` +
       (label.startsWith('.NET') ? `${after.length} requests, all to its own 127.0.0.1 server` : `${after.length} requests after load`));
     await page.close();
   }

@@ -73,7 +73,11 @@ export class DirectoryTarget implements OutputTarget {
   }
 
   async create(name: string, encoding: TextEncoding): Promise<OutputFile> {
-    const handle = await this.dir.getFileHandle(name, { create: true });
+    // A relative path (a zip's layout) becomes sub-folders; '..' and empty parts are dropped.
+    const parts = name.split('/').filter((p) => p && p !== '.' && p !== '..');
+    let dir = this.dir;
+    for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create: true });
+    const handle = await dir.getFileHandle(parts[parts.length - 1], { create: true });
     const writable = await handle.createWritable();
     let pending: string[] = [];
     let pendingLen = 0;

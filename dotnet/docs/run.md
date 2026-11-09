@@ -13,7 +13,8 @@ gridanon ui --no-browser        # just print the URL
 
 The page opens in your default browser. Every option has a **?** that explains it, and **Help** in the header opens a one-page guide. The page is the same as the TypeScript edition's, with three tabs:
 
-- **Anonymize:** drop model files (or *Try the sample set*), pick a profile, optionally *Renumber buses* and *Save mapping*, then press **Anonymize**. The verdict and one row per file replace the file list. Results are written to the output folder and can also be downloaded. *Back to files* re-runs with other options; *Start over* begins a new set.
+- **Anonymize:** drop model files, or one `.zip` of them (or *Try the sample set*), pick a profile, optionally *Renumber buses* and *Save mapping*, then press **Anonymize**. The verdict and one row per file replace the file list. Results are written to the output folder and can also be downloaded. *Back to files* re-runs with other options; *Start over* begins a new set.
+  When PSS®E files are in the set, a **PSS®E set** panel shows which parts are there (case, contingencies, monitored elements, subsystems, auxiliary) and adds a missing one in a click. Several files, or a zip, also come back as one zip (`<zip>_anonymized.zip`, or `gridanon_anonymized.zip`) with the original folders and names inside, written to the output folder and offered for download.
 - **Restore:** drop anonymized files, choose the mapping, and press **Restore**.
 - **Settings:** profile, salt, continue from a mapping, redact terms, PSS®E options, keep comments and type hints, and the output folder. When a setting changes the result, a line under the Anonymize button says so.
 
@@ -41,7 +42,8 @@ gridanon version
 | `--salt-env <VAR>` | read the salt from an environment variable (keeps it out of shell history) |
 | `-m, --mapping <file>` | write the **private** mapping (reverses everything, so keep it safe) |
 | `--use-mapping <file>` | continue an earlier mapping: a new revision gets the same pseudonyms |
-| `-f, --format <id>` | force `cim`, `psse` or `text` instead of detecting |
+| `-f, --format <id>` | force `cim`, `psse`, `psse-aux` or `text` instead of detecting |
+| `--zip <file>` | put every output into one zip. A `.zip` input always gives `<name>_anonymized.zip` with the same layout and the original file names inside |
 | `--renumber-buses` | PSS®E: renumber buses in every field that references one |
 | `--keep-comments` | keep XML `<!-- -->` and RAW `/` comments |
 | `--keep-titles` | PSS®E: keep the two case-title lines |
@@ -65,8 +67,14 @@ gridanon anonymize case.raw -p profiles\vendor-strict.json --redact "Meridian Po
 # Next revision: same pseudonyms for unchanged equipment, new ones for new equipment
 gridanon anonymize case_2027.raw --use-mapping private\map.json -m private\map_2027.json
 
-# Companion files in the same run get the same names
-gridanon anonymize case.raw contingencies.con monitored.mon -m private\map.json
+# A PSS/E set: the .con/.mon/.sub files follow the case (bus numbers, names, labels)
+gridanon anonymize case.raw contingencies.con monitored.mon areas.sub --renumber-buses -m private\map.json
+
+# The same set as one zip: back comes share\study_anonymized.zip, same layout inside
+gridanon anonymize study.zip --renumber-buses -o share -m private\map.json
+
+# Loose files, delivered as one zip
+gridanon anonymize case.raw contingencies.con --zip share\for_vendor.zip
 
 # Results back from the vendor
 gridanon restore vendor_results.csv --mapping private\map.json -o restored

@@ -8,12 +8,17 @@ import { anonymize, detectFormat, getFormat, restore, type InputFile } from '../
 import { mappingToJson, parseMapping } from '../core/mapping.ts';
 import { loadProfile } from '../core/profile.ts';
 import type { FileReport } from '../core/shared.ts';
+import { zipToBlob } from '../core/zip.ts';
 import { blobSource, DirectoryTarget, MemoryTarget, type ProducedFile } from './browser-io.ts';
 
 export interface RunRequest {
   type: 'run';
   mode: 'anonymize' | 'restore';
   files: File[];
+  /** per file: its path in the set ('case/x.raw' when it came from a zip); outputs keep that layout */
+  paths: string[];
+  /** when set, every output is also packed into one zip of this name, under the original paths */
+  zipName?: string;
   /** per file: a format id, or null to detect */
   formats: (string | null)[];
   profileJson: string;
@@ -32,7 +37,7 @@ export type WorkerOut =
   | { type: 'detected'; formats: (string | null)[] }
   | { type: 'progress'; stage: string; file: string; index: number; total: number }
   | { type: 'file-done'; report: FileReport; file?: ProducedFile }
-  | { type: 'done'; salt: string; saltWasGenerated: boolean; mapping: string; clean: boolean; savedToFolder: boolean }
+  | { type: 'done'; salt: string; saltWasGenerated: boolean; mapping: string; clean: boolean; savedToFolder: boolean; zip?: ProducedFile }
   | { type: 'error'; message: string };
 
 const post = (m: WorkerOut) => (self as unknown as Worker).postMessage(m);
@@ -58,10 +63,12 @@ self.onmessage = async (e: MessageEvent<RunRequest | DetectRequest>) => {
     const inputs: InputFile[] = [];
     for (let i = 0; i < req.files.length; i++) {
       const f = req.files[i];
-      const source = blobSource(f, f.name);
+      const path = req.paths[i] ?? f.name;
+      const source = blobSource(f, path);
       const id = req.formats[i];
       const format = id ? getFormat(id) : await detectFormat(source);
-      if (format) inputs.push({ source, format });
+      const slash = path.lastIndexOf('/');
+      if (format) inputs.push({ source, format, relativeDirectory: slash > 0 ? path.slice(0, slash) : '' });
     }
     if (inputs.length === 0) throw new Error('None of these files is in a recognized format.');
 
@@ -76,7 +83,14 @@ self.onmessage = async (e: MessageEvent<RunRequest | DetectRequest>) => {
     const result = req.mode === 'restore' ? await restore(inputs, target, opts) : await anonymize(inputs, target, opts);
 
     result.report.files.forEach((report, i) => post({ type: 'file-done', report, file: target.produced[i] }));
+    // One zip of everything, with the original paths and names inside (report.input is the path).
+    let zip: ProducedFile | undefined;
+    if (req.zipName && target instanceof MemoryTarget) {
+      const entries = result.report.files.map((r, i) => ({ name: r.input, data: target.produced[i].blob! }));
+      zip = { name: req.zipName, blob: await zipToBlob(entries) };
+    }
     post({
+      zip,
       type: 'done',
       salt: result.salt,
       saltWasGenerated: result.saltWasGenerated,

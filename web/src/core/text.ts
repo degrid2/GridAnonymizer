@@ -73,8 +73,9 @@ class TextJob implements FormatJob {
 export const textHandler: FormatHandler = {
   id: 'text',
   description: "Any text file: applies the run's name/id mapping (whole-word, longest match first)",
-  extensions: ['.csv', '.txt', '.con', '.mon', '.sub', '.log', '.json', '.py', '.idv'],
+  extensions: ['.csv', '.txt', '.log', '.json', '.py', '.idv'],
   encoding: 'utf8',
+  phase: 2,
   sniff: () => false,
   createJob: (ctx) => new TextJob(ctx),
 };

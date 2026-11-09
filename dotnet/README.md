@@ -10,7 +10,7 @@ The .NET edition is one self-contained executable, `gridanon`, with:
 
 It has no runtime dependencies beyond the .NET base class library, makes no network calls and sends no telemetry. Native builds need nothing installed.
 
-Names, ids, descriptions, comments, coordinates and (optionally) PSS®E bus numbers get consistent pseudonyms. Impedances, ratings, topology and every other electrical value stay exactly as they were. Every output is re-read and audited for anything that got through.
+Names, ids, descriptions, comments, coordinates and (optionally) PSS®E bus numbers get consistent pseudonyms. Impedances, ratings, topology and every other electrical value stay exactly as they were. Every output is re-read and audited for anything that got through. A PSS®E case can bring its `.con`, `.mon`, `.sub` and `.aux` files, loose or in one `.zip`; they follow the case, and a zip comes back as a zip.
 
 ## Five-minute start
 

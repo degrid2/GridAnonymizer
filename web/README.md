@@ -12,7 +12,7 @@ The TypeScript edition comes in three forms, all built from this folder:
 
 Your files never leave your computer. The engine runs inside the browser tab (a Web Worker), and the page enforces `connect-src 'none'`, so the browser itself blocks any network request. There are no runtime dependencies: the page and CLI use only browser and Node built-ins.
 
-Names, ids, descriptions, comments, coordinates and (optionally) PSS®E bus numbers get consistent pseudonyms. Impedances, ratings, topology and every other electrical value stay exactly as they were. Every output is re-read and audited for anything that got through.
+Names, ids, descriptions, comments, coordinates and (optionally) PSS®E bus numbers get consistent pseudonyms. Impedances, ratings, topology and every other electrical value stay exactly as they were. Every output is re-read and audited for anything that got through. A PSS®E case can bring its `.con`, `.mon`, `.sub` and `.aux` files, loose or in one `.zip`; they follow the case, and a zip comes back as a zip.
 
 ## Five-minute start
 

@@ -8,6 +8,7 @@ import { cimHandler } from './cim.ts';
 import { newSalt } from './hash.ts';
 import { emptyMapping, type MappingDocument } from './mapping.ts';
 import { defaultProfile, type Profile } from './profile.ts';
+import { psseAuxHandler } from './psse-aux.ts';
 import { psseHandler } from './psse.ts';
 import { readHead, type AuditResult, type ByteSource, type FormatHandler, type OutputTarget, type RunReport } from './shared.ts';
 import { textHandler } from './text.ts';
@@ -17,7 +18,7 @@ import { VERSION } from './version.ts';
 export { VERSION };
 export const TOOL = `gridanon-web ${VERSION}`;
 
-export const formats: readonly FormatHandler[] = [cimHandler, psseHandler, textHandler];
+export const formats: readonly FormatHandler[] = [cimHandler, psseHandler, psseAuxHandler, textHandler];
 
 export function getFormat(id: string): FormatHandler {
   const f = formats.find((h) => h.id === id.toLowerCase());
@@ -37,6 +38,8 @@ export async function detectFormat(source: ByteSource): Promise<FormatHandler | 
 export interface InputFile {
   source: ByteSource;
   format: FormatHandler;
+  /** Folder of the output, relative to the target ('' or undefined: the top). Keeps a zip's layout. */
+  relativeDirectory?: string;
 }
 
 export interface EngineOptions {
@@ -99,7 +102,7 @@ async function run(inputs: InputFile[], target: OutputTarget, opts: EngineOption
     if (!groups.has(i.format.id)) groups.set(i.format.id, []);
     groups.get(i.format.id)!.push(i);
   }
-  const ordered = [...groups.entries()].sort((a, b) => (a[0] === 'text' ? 1 : 0) - (b[0] === 'text' ? 1 : 0));
+  const ordered = [...groups.entries()].sort((a, b) => (a[1][0].format.phase ?? 0) - (b[1][0].format.phase ?? 0));
   let done = 0;
 
   for (const [id, files] of ordered) {
@@ -108,7 +111,7 @@ async function run(inputs: InputFile[], target: OutputTarget, opts: EngineOption
       profile,
       salt,
       restore: isRestore,
-      mapping: id === 'text' || isRestore ? mapping : opts.mapping,
+      mapping: (handler.phase ?? 0) > 0 || isRestore ? mapping : opts.mapping,
     });
     for (const f of files) {
       opts.log?.(`scan     ${f.source.name} [${id}]`);
@@ -117,7 +120,8 @@ async function run(inputs: InputFile[], target: OutputTarget, opts: EngineOption
     }
     job.buildMaps();
     for (const f of files) {
-      const name = outputName(f.source.name, suffix);
+      const rel = (f.relativeDirectory ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+      const name = rel ? `${rel}/${outputName(f.source.name, suffix)}` : outputName(f.source.name, suffix);
       opts.log?.(`${isRestore ? 'restore ' : 'rewrite '} ${f.source.name} -> ${name}`);
       opts.progress?.(isRestore ? 'restoring' : 'rewriting', f.source.name, done, inputs.length);
       const out = await target.create(name, handler.encoding);

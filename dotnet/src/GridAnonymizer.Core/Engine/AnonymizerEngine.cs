@@ -12,7 +12,7 @@ namespace GridAnonymizer.Engine;
 /// <summary>The formats this build understands. Add a handler here to support a new one.</summary>
 public static class FormatRegistry
 {
-    public static IReadOnlyList<IFormatHandler> All { get; } = [new CimHandler(), new PsseHandler(), new TextHandler()];
+    public static IReadOnlyList<IFormatHandler> All { get; } = [new CimHandler(), new PsseHandler(), new PsseAuxHandler(), new TextHandler()];
 
     public static IFormatHandler Get(string id) =>
         All.FirstOrDefault(h => h.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
@@ -37,7 +37,10 @@ public static class FormatRegistry
     }
 }
 
-public sealed record InputFile(string Path, IFormatHandler Format);
+/// <param name="Path">The file to read.</param>
+/// <param name="Format">How to read it.</param>
+/// <param name="RelativeDirectory">Sub-folder of the output directory to write to (keeps a zip's layout).</param>
+public sealed record InputFile(string Path, IFormatHandler Format, string RelativeDirectory = "");
 
 public sealed class EngineOptions
 {
@@ -97,7 +100,7 @@ public sealed class AnonymizerEngine(EngineOptions options)
 
         var done = 0;
         var groups = inputs.GroupBy(i => i.Format.Id)
-            .OrderBy(g => g.Key == "text" ? 1 : 0)
+            .OrderBy(g => g.First().Format.Phase)
             .ToList();
 
         foreach (var group in groups)
@@ -108,8 +111,8 @@ public sealed class AnonymizerEngine(EngineOptions options)
                 Profile = options.Profile,
                 Salt = salt,
                 Restore = restore,
-                // text jobs see everything mapped so far in this run
-                Mapping = handler.Id == "text" || restore ? mapping : options.Mapping,
+                // later phases (companion files, text) see everything mapped so far in this run
+                Mapping = handler.Phase > 0 || restore ? mapping : options.Mapping,
             };
             var job = handler.CreateJob(ctx);
             var files = group.ToList();
@@ -128,7 +131,7 @@ public sealed class AnonymizerEngine(EngineOptions options)
 
             foreach (var f in files)
             {
-                var output = OutputPathFor(f.Path, outputDirectory, suffix);
+                var output = OutputPathFor(f.Path, Path.Combine(outputDirectory, f.RelativeDirectory), suffix);
                 if (Path.GetFullPath(output).Equals(Path.GetFullPath(f.Path), StringComparison.OrdinalIgnoreCase))
                     throw new IOException($"Refusing to overwrite the input file {f.Path}");
                 options.Log?.Invoke($"{(restore ? "restore " : "rewrite ")} {Path.GetFileName(f.Path)} -> {Path.GetFileName(output)}");

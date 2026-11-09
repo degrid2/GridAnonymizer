@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GridAnonymizer.Cli;
 using GridAnonymizer.Engine;
+using GridAnonymizer.IO;
 using GridAnonymizer.Mapping;
 using GridAnonymizer.Profiles;
 
@@ -39,11 +40,12 @@ namespace GridAnonymizer.Cli
                   --salt-env <VAR>     read the salt from an environment variable
               -m, --mapping <file>     write the PRIVATE reversible mapping here
                   --use-mapping <file> continue an earlier mapping (consistent ids for a new model revision)
-              -f, --format <id>        force a format: cim | psse | text (default: detect per file)
+              -f, --format <id>        force a format: cim | psse | psse-aux | text (default: detect per file)
                   --renumber-buses     PSS/E: renumber buses everywhere they are referenced
                   --keep-comments      keep XML comments / RAW '/' comments
                   --keep-titles        PSS/E: keep the two case-title lines
                   --redact <term>      a term that must never survive (repeatable), e.g. your utility's name
+                  --zip <file>         put every output into one zip (a .zip input always gives <name>_anonymized.zip)
                   --report <file>      write a JSON report of the run
                   --no-audit           skip the post-run leak audit
               -r, --recursive          descend into directories
@@ -126,7 +128,7 @@ namespace GridAnonymizer.Cli
         private static int Formats()
         {
             foreach (var h in FormatRegistry.All)
-                Console.WriteLine($"  {h.Id,-6} {h.Description}  [{string.Join(" ", h.Extensions)}]");
+                Console.WriteLine($"  {h.Id,-8} {h.Description}  [{string.Join(" ", h.Extensions)}]");
             return ExitCodes.Ok;
         }
 
@@ -169,6 +171,7 @@ namespace GridAnonymizer.Cli
                 salt = Environment.GetEnvironmentVariable(envVar) ?? throw new UsageException($"environment variable {envVar} is not set");
             var forced = a.Value("-f", "--format");
             var reportPath = a.Value("--report");
+            var zipOut = a.Value("--zip");
             var recursive = a.Flag("-r", "--recursive");
             var noAudit = a.Flag("--no-audit");
             a.EnsureNoUnknown();
@@ -178,8 +181,26 @@ namespace GridAnonymizer.Cli
             if (mappingOut is not null && mappingIn is not null && Path.GetFullPath(mappingOut) == Path.GetFullPath(mappingIn))
                 throw new UsageException("write the updated mapping to a new file rather than over --use-mapping");
 
-            var inputs = InputExpander.Expand(a.Positional, recursive, forced);
-            if (inputs.Count == 0) throw new UsageException("no recognizable input files (use --format to force one)");
+            var work = Path.Combine(Path.GetTempPath(), "gridanon-" + Guid.NewGuid().ToString("N")[..12]);
+            try
+            {
+                return RunWithBundles(a, restore, quiet, profile, outDir, mappingIn, mappingOut, salt, forced, reportPath, zipOut, recursive, noAudit, work);
+            }
+            finally
+            {
+                // Extracted zip entries are copies of the user's models: never leave them behind.
+                if (Directory.Exists(work)) Directory.Delete(work, recursive: true);
+            }
+        }
+
+        private static int RunWithBundles(Args a, bool restore, bool quiet, AnonymizationProfile profile, string outDir, string? mappingIn,
+            string? mappingOut, string? salt, string? forced, string? reportPath, string? zipOut, bool recursive, bool noAudit, string work)
+        {
+            var planned = InputExpander.Expand(a.Positional, recursive, forced, work);
+            if (planned.Count == 0) throw new UsageException("no recognizable input files (use --format to force one)");
+            var inputs = planned.Select(p => p.Input).ToList();
+            var staging = zipOut is not null || planned.Any(p => p.Bundle is not null);
+            var engineOut = staging ? Path.Combine(work, "out") : outDir;
 
             var mapping = mappingIn is null ? null : MappingDocument.Load(mappingIn);
             var engine = new AnonymizerEngine(new EngineOptions
@@ -191,7 +212,8 @@ namespace GridAnonymizer.Cli
                 Log = quiet ? null : s => Console.Error.WriteLine("  " + s),
             });
 
-            var result = restore ? engine.Restore(inputs, outDir) : engine.Anonymize(inputs, outDir);
+            var result = restore ? engine.Restore(inputs, engineOut) : engine.Anonymize(inputs, engineOut);
+            if (staging) Bundles.Package(result.Report, planned, outDir, zipOut, restore ? "_restored" : "_anonymized");
 
             if (mappingOut is not null)
             {
@@ -332,25 +354,43 @@ namespace GridAnonymizer.Cli
         }
     }
 
+    /// <summary>An input file, and where it came from when it was inside a zip.</summary>
+    internal sealed record PlannedInput(InputFile Input, string? Bundle, string EntryPath);
+
     internal static class InputExpander
     {
-        public static List<InputFile> Expand(IEnumerable<string> patterns, bool recursive, string? forcedFormat)
+        public static List<PlannedInput> Expand(IEnumerable<string> patterns, bool recursive, string? forcedFormat, string work)
         {
             var forced = forcedFormat is null ? null : FormatRegistry.Get(forcedFormat);
-            var result = new List<InputFile>();
+            var result = new List<PlannedInput>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var zips = 0;
+
+            IFormatHandler? FormatOf(string full, string shown, bool explicitlyNamed)
+            {
+                var fmt = forced ?? FormatRegistry.Detect(full);
+                if (fmt is null && explicitlyNamed) Console.Error.WriteLine($"  skip     {shown}: unknown format (use --format)");
+                return fmt;
+            }
 
             void Add(string path, bool explicitlyNamed)
             {
                 var full = Path.GetFullPath(path);
                 if (!seen.Add(full)) return;
-                var fmt = forced ?? FormatRegistry.Detect(full);
-                if (fmt is null)
+                if (full.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (explicitlyNamed) Console.Error.WriteLine($"  skip     {path}: unknown format (use --format)");
+                    var k = ++zips;
+                    var dest = Path.Combine(work, "in", k.ToString());
+                    foreach (var e in ZipBundle.Extract(full, dest))
+                    {
+                        if (FormatOf(e.FullPath, $"{Path.GetFileName(full)}!{e.RelativePath}", true) is not { } zf) continue;
+                        var dir = Path.GetDirectoryName(e.RelativePath) ?? "";
+                        result.Add(new PlannedInput(new InputFile(e.FullPath, zf, Path.Combine("zip" + k, dir)), full, e.RelativePath));
+                    }
                     return;
                 }
-                result.Add(new InputFile(full, fmt));
+                if (FormatOf(full, path, explicitlyNamed) is not { } fmt) return;
+                result.Add(new PlannedInput(new InputFile(full, fmt), null, Path.GetFileName(full)));
             }
 
             foreach (var p in patterns)
@@ -369,6 +409,50 @@ namespace GridAnonymizer.Cli
                 else throw new FileNotFoundException($"input not found: {p}");
             }
             return result;
+        }
+    }
+
+    /// <summary>
+    /// Turns staged outputs into what the user asked for: a .zip input becomes
+    /// &lt;name&gt;_anonymized.zip with the original layout and file names inside;
+    /// --zip puts everything into one archive; other files are moved to the output folder.
+    /// </summary>
+    internal static class Bundles
+    {
+        public static void Package(RunReport report, List<PlannedInput> planned, string outDir, string? zipOut, string suffix)
+        {
+            var byInput = planned.ToDictionary(p => p.Input.Path, StringComparer.OrdinalIgnoreCase);
+            var bundles = planned.Where(p => p.Bundle is not null).Select(p => p.Bundle!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            Directory.CreateDirectory(outDir);
+
+            string EntryName(PlannedInput p) =>
+                p.Bundle is not null && bundles.Count > 1 && zipOut is not null
+                    ? Path.GetFileNameWithoutExtension(p.Bundle) + "/" + p.EntryPath
+                    : p.EntryPath;
+
+            var outputs = report.Files.Where(f => f.Output is not null && byInput.ContainsKey(f.Input)).ToList();
+
+            if (zipOut is not null)
+            {
+                var entries = outputs.Select(f => (Name: EntryName(byInput[f.Input]), File: f)).ToList();
+                ZipBundle.Write(zipOut, entries.Select(e => (e.Name, e.File.Output!)));
+                foreach (var (name, f) in entries) f.Output = $"{zipOut}!{name}";
+                return;
+            }
+
+            foreach (var bundle in bundles)
+            {
+                var target = Path.Combine(outDir, Path.GetFileNameWithoutExtension(bundle) + suffix + ".zip");
+                var mine = outputs.Where(f => string.Equals(byInput[f.Input].Bundle, bundle, StringComparison.OrdinalIgnoreCase)).ToList();
+                ZipBundle.Write(target, mine.Select(f => (byInput[f.Input].EntryPath, f.Output!)));
+                foreach (var f in mine) f.Output = $"{target}!{byInput[f.Input].EntryPath}";
+            }
+            foreach (var f in outputs.Where(f => byInput[f.Input].Bundle is null))
+            {
+                var dest = Path.Combine(outDir, Path.GetFileName(f.Output!));
+                File.Move(f.Output!, dest, overwrite: true);
+                f.Output = dest;
+            }
         }
     }
 }

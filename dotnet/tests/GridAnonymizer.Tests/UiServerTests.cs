@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -100,6 +101,64 @@ public sealed class UiServerTests : IDisposable
             Assert.Equal(File.ReadAllBytes(Path.Combine(_tmp.File("direct"), name)), bytes);
         }
         Assert.Equal(2, expected.Report.Files.Count);
+    }
+
+    [Fact]
+    public async Task A_psse_set_keeps_its_layout_and_comes_back_as_one_zip()
+    {
+        var session = (await (await _http.SendAsync(Api(HttpMethod.Post, "/api/session"))).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+        var paths = new[] { "case/meridian_v33.raw", "study/meridian_v33.con", "study/meridian_v33.mon" };
+        var names = new List<string>();
+        foreach (var p in paths)
+        {
+            var put = await _http.SendAsync(Api(HttpMethod.Put, $"/api/session/{session}/file?name={Path.GetFileName(p)}", new ByteArrayContent(File.ReadAllBytes(Run.Sample("psse/" + Path.GetFileName(p))))));
+            names.Add((await put.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("name").GetString()!);
+        }
+        var run = new
+        {
+            mode = "anonymize",
+            names,
+            paths,
+            zipName = "meridian_anonymized.zip",
+            formats = new string?[] { null, null, null },
+            profileJson = "",
+            salt = "test-salt-123",
+            overrides = new { renumberBuses = true, keepComments = false, keepTitles = false, keepTypeHints = false, redactTerms = Array.Empty<string>() }
+        };
+        var res = await _http.SendAsync(Api(HttpMethod.Post, $"/api/session/{session}/run",
+            new StringContent(JsonSerializer.Serialize(run), Encoding.UTF8, "application/json")));
+        var messages = (await res.Content.ReadAsStringAsync()).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => JsonDocument.Parse(l).RootElement).ToList();
+        var done = messages.Single(m => m.GetProperty("type").GetString() == "done");
+        Assert.True(done.GetProperty("clean").GetBoolean(), string.Join("\n", messages));
+        Assert.True(File.Exists(Path.Combine(_tmp.File("out"), "study", "meridian_v33_anonymized.con")));
+
+        var zip = done.GetProperty("zip");
+        Assert.Equal("meridian_anonymized.zip", zip.GetProperty("name").GetString());
+        var bytes = await _http.GetByteArrayAsync(zip.GetProperty("url").GetString() + "?t=" + _token);
+        using var archive = new ZipArchive(new MemoryStream(bytes));
+        Assert.Equal(paths.Order(), archive.Entries.Select(e => e.FullName).Order());
+        using var con = new StreamReader(archive.GetEntry("study/meridian_v33.con")!.Open());
+        Assert.DoesNotContain("NW-RB", await con.ReadToEndAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Paths_cannot_escape_the_output_folder()
+    {
+        var session = (await (await _http.SendAsync(Api(HttpMethod.Post, "/api/session"))).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+        var put = await _http.SendAsync(Api(HttpMethod.Put, $"/api/session/{session}/file?name=x.con", new StringContent("CONTINGENCY 'A'\nEND\nEND\n")));
+        var name = (await put.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("name").GetString();
+        var run = new
+        {
+            mode = "anonymize",
+            names = new[] { name },
+            paths = new[] { "../../evil/x.con" },
+            formats = new string?[] { null },
+            profileJson = "",
+            overrides = new { renumberBuses = false, keepComments = false, keepTitles = false, keepTypeHints = false, redactTerms = Array.Empty<string>() }
+        };
+        var res = await _http.SendAsync(Api(HttpMethod.Post, $"/api/session/{session}/run", new StringContent(JsonSerializer.Serialize(run), Encoding.UTF8, "application/json")));
+        Assert.Contains("\"type\":\"error\"", await res.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(_tmp.Path, "evil")));
     }
 
     public void Dispose()

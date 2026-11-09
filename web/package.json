@@ -20,7 +20,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
     "test:parity": "node --experimental-strip-types --no-warnings --test test/parity.test.ts",
-    "test:browser": "node scripts/browser-smoke.mjs",
+    "test:browser": "node --experimental-strip-types --no-warnings scripts/browser-smoke.mjs",
     "cli": "node --experimental-strip-types --no-warnings cli/gridanon.ts",
     "start": "node server.mjs",
     "build:dotnet-ui": "vite build --mode dotnet && node scripts/copy-to-dotnet.mjs"

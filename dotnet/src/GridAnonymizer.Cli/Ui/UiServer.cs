@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
@@ -8,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using GridAnonymizer.Engine;
+using GridAnonymizer.IO;
 using GridAnonymizer.Mapping;
 
 namespace GridAnonymizer.Cli.Ui;
@@ -43,7 +45,7 @@ internal sealed class UiServer : IDisposable
         public string Id { get; } = id;
         public string InputDir { get; } = inputDir;
         public ConcurrentDictionary<string, string> Inputs { get; } = new(StringComparer.Ordinal);   // name → path
-        public ConcurrentDictionary<string, string> Outputs { get; } = new(StringComparer.Ordinal);  // name → path
+        public ConcurrentDictionary<string, (string Path, string Name)> Outputs { get; } = new(StringComparer.Ordinal);  // download id → file
     }
 
     public UiServer(string outputDir, int port = 0, string? token = null)
@@ -216,9 +218,9 @@ internal sealed class UiServer : IDisposable
                 }
             case "download" when req.HttpMethod == "GET" && parts.Length == 5:
                 {
-                    var name = Uri.UnescapeDataString(parts[4]);
-                    if (!session.Outputs.TryGetValue(name, out var file) || !File.Exists(file)) { await Text(res, 404, "no such output"); return; }
-                    res.ContentType = "application/octet-stream";
+                    if (!session.Outputs.TryGetValue(parts[4], out var output) || !File.Exists(output.Path)) { await Text(res, 404, "no such output"); return; }
+                    var (file, name) = output;
+                    res.ContentType = name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ? "application/zip" : "application/octet-stream";
                     res.AddHeader("Content-Disposition", $"attachment; filename=\"{name.Replace("\"", "", StringComparison.Ordinal)}\"");
                     await using var fs = File.OpenRead(file);
                     res.ContentLength64 = fs.Length;
@@ -260,6 +262,7 @@ internal sealed class UiServer : IDisposable
             profile.RedactTerms.AddRange(r.Overrides.RedactTerms);
 
             var inputs = new List<InputFile>();
+            var setPaths = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var i = 0; i < r.Names.Count; i++)
             {
                 var name = r.Names[i];
@@ -267,7 +270,11 @@ internal sealed class UiServer : IDisposable
                 var id = i < r.Formats.Count ? r.Formats[i] : null;
                 if (id == "skip") continue;
                 var fmt = id is not null ? FormatRegistry.Get(id) : FormatRegistry.Detect(path);
-                if (fmt is not null) inputs.Add(new InputFile(path, fmt));
+                if (fmt is null) continue;
+                // Where the file sat in its set (a zip's folders): outputs keep that layout.
+                var rel = i < r.Paths.Count && r.Paths[i] is { } p ? ZipBundle.SafeRelativePath(p) ?? name : name;
+                inputs.Add(new InputFile(path, fmt, Path.GetDirectoryName(rel) ?? ""));
+                setPaths[Path.GetFullPath(path)] = rel;
             }
             if (inputs.Count == 0) throw new InvalidOperationException("None of these files is in a recognized format.");
 
@@ -284,15 +291,24 @@ internal sealed class UiServer : IDisposable
             var result = await Task.Run(() => restore ? engine.Restore(inputs, _outputDir) : engine.Anonymize(inputs, _outputDir));
             await Task.WhenAll(progress);
 
-            foreach (var f in result.Report.Files)
+            UiProducedFile Offer(string file)
             {
-                var name = Path.GetFileName(f.Output!);
-                session.Outputs[name] = f.Output!;
-                await Send(new UiFileDone
-                {
-                    Report = f,
-                    File = new UiProducedFile { Name = name, Url = $"/api/session/{session.Id}/download/{Uri.EscapeDataString(name)}" },
-                }, UiJsonContext.Default.UiFileDone);
+                var id = session.Outputs.Count.ToString(CultureInfo.InvariantCulture);
+                var name = Path.GetFileName(file);
+                session.Outputs[id] = (file, name);
+                return new UiProducedFile { Name = name, Url = $"/api/session/{session.Id}/download/{id}" };
+            }
+
+            foreach (var f in result.Report.Files)
+                await Send(new UiFileDone { Report = f, File = Offer(f.Output!) }, UiJsonContext.Default.UiFileDone);
+
+            // One zip of everything, with the original paths and names inside, next to the files.
+            UiProducedFile? zip = null;
+            if (SafeZipName(r.ZipName) is { } zipName)
+            {
+                var zipPath = Path.Combine(_outputDir, zipName);
+                ZipBundle.Write(zipPath, result.Report.Files.Select(f => (setPaths.GetValueOrDefault(Path.GetFullPath(f.Input), Path.GetFileName(f.Input)), f.Output!)));
+                zip = Offer(zipPath);
             }
             await Send(new UiDone
             {
@@ -300,6 +316,7 @@ internal sealed class UiServer : IDisposable
                 SaltWasGenerated = result.SaltWasGenerated,
                 Mapping = result.Mapping.ToJson(),
                 Clean = result.Report.Clean,
+                Zip = zip,
             }, UiJsonContext.Default.UiDone);
         }
         catch (Exception e) when (e is IOException or InvalidDataException or InvalidOperationException or NotSupportedException
@@ -307,6 +324,13 @@ internal sealed class UiServer : IDisposable
         {
             await Send(new UiError { Message = e.Message }, UiJsonContext.Default.UiError);
         }
+    }
+
+    private static string? SafeZipName(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var name = SafeName(raw);
+        return name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ? name : name + ".zip";
     }
 
     private static string SafeName(string raw)
@@ -392,6 +416,10 @@ internal sealed class UiRunRequest
     public string Mode { get; set; } = "anonymize";
     public List<string?> Names { get; set; } = [];
     public List<string?> Formats { get; set; } = [];
+    /// <summary>Per file: its path in the set ("case/x.raw" when it came from a zip).</summary>
+    public List<string?> Paths { get; set; } = [];
+    /// <summary>When set, the outputs are also packed into one zip of this name.</summary>
+    public string? ZipName { get; set; }
     public string ProfileJson { get; set; } = "";
     public UiOverrides Overrides { get; set; } = new();
     public string? Salt { get; set; }
@@ -428,6 +456,7 @@ internal sealed class UiDone
     public string Mapping { get; set; } = "";
     public bool Clean { get; set; }
     public bool SavedToFolder { get; set; } = true;
+    public UiProducedFile? Zip { get; set; }
 }
 
 internal sealed class UiError

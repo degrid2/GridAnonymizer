@@ -3,13 +3,15 @@
  * Zero runtime dependencies: Node's standard library only.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import { anonymize, auditPair, detectFormat, formats, getFormat, restore, TOOL, type InputFile, type RunResult } from '../src/core/engine.ts';
 import { mappingToJson, parseMapping } from '../src/core/mapping.ts';
 import { defaultProfile, loadProfile, profileToJson, type Profile } from '../src/core/profile.ts';
-import { NotSupportedError } from '../src/core/shared.ts';
-import { dirTarget, fileSource } from './node-io.ts';
+import { NotSupportedError, type RunReport } from '../src/core/shared.ts';
+import { entrySource, listZip, ZipError } from '../src/core/zip.ts';
+import { dirTarget, fileAccess, fileSource, moveFile, writeZip } from './node-io.ts';
 
 const USAGE = `gridanon (Node edition) - anonymize power-system network models on your own machine.
 
@@ -28,12 +30,13 @@ ANONYMIZE OPTIONS
       --salt-env <VAR>     read the salt from an environment variable
   -m, --mapping <file>     write the PRIVATE reversible mapping here
       --use-mapping <file> continue an earlier mapping
-  -f, --format <id>        force a format: cim | psse | text
+  -f, --format <id>        force a format: cim | psse | psse-aux | text
       --renumber-buses     PSS/E: renumber buses everywhere they are referenced
       --keep-comments      keep XML comments / RAW '/' comments
       --keep-titles        PSS/E: keep the two case-title lines
       --redact <term>      a term that must never survive (repeatable)
       --report <file>      write a JSON report of the run
+      --zip <file>         put every output into one zip (a .zip input always gives <name>_anonymized.zip)
       --no-audit           skip the post-run leak audit
   -r, --recursive          descend into directories
   -q, --quiet              only print problems
@@ -97,18 +100,37 @@ function loadProfileFromArgs(a: Args): Profile {
   return profile;
 }
 
-async function expand(patterns: string[], recursive: boolean, forced?: string): Promise<InputFile[]> {
+/** An input file, and where it came from when it was inside a zip. */
+interface PlannedInput { input: InputFile; bundle?: string; entryPath: string }
+
+async function expand(patterns: string[], recursive: boolean, forced: string | undefined, closers: (() => Promise<void>)[]): Promise<PlannedInput[]> {
   const forcedFormat = forced ? getFormat(forced) : undefined;
-  const result: InputFile[] = [];
+  const result: PlannedInput[] = [];
   const seen = new Set<string>();
+  let zips = 0;
   const add = async (path: string, explicit: boolean) => {
     const full = resolve(path);
-    if (seen.has(full)) return;
-    seen.add(full);
+    if (seen.has(full.toLowerCase())) return;
+    seen.add(full.toLowerCase());
+    if (full.toLowerCase().endsWith('.zip')) {
+      const k = ++zips;
+      const access = await fileAccess(full);
+      closers.push(access.close);
+      for (const e of await listZip(access, basename(full))) {
+        // Named "<zip>!<entry>": the engine only uses the part after the last separator.
+        const source = entrySource(access, e, `${full}!${e.path}`, basename(full));
+        const format = forcedFormat ?? (await detectFormat(source));
+        if (!format) { console.error(`  skip     ${basename(full)}!${e.path}: unknown format (use --format)`); continue; }
+        const slash = e.path.lastIndexOf('/');
+        const dir = slash >= 0 ? e.path.slice(0, slash) : '';
+        result.push({ input: { source, format, relativeDirectory: dir ? `zip${k}/${dir}` : `zip${k}` }, bundle: full, entryPath: e.path });
+      }
+      return;
+    }
     const source = fileSource(full);
     const format = forcedFormat ?? (await detectFormat(source));
     if (!format) { if (explicit) console.error(`  skip     ${path}: unknown format (use --format)`); return; }
-    result.push({ source, format });
+    result.push({ input: { source, format }, entryPath: basename(full) });
   };
   const walk = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
@@ -123,6 +145,39 @@ async function expand(patterns: string[], recursive: boolean, forced?: string): 
     else throw new Error(`input not found: ${p}`);
   }
   return result;
+}
+
+/**
+ * Turns staged outputs into what the user asked for (twin of Bundles.Package in
+ * the .NET CLI): a .zip input becomes <name>_anonymized.zip with the original
+ * layout and file names inside; --zip puts everything into one archive; other
+ * files are moved to the output folder.
+ */
+async function packageBundles(report: RunReport, planned: PlannedInput[], outDir: string, zipOut: string | undefined, suffix: string) {
+  const byInput = new Map(planned.map((p) => [p.input.source.name, p]));
+  const bundles = [...new Map(planned.filter((p) => p.bundle).map((p) => [p.bundle!.toLowerCase(), p.bundle!])).values()];
+  mkdirSync(outDir, { recursive: true });
+  const stem = (f: string) => basename(f, extname(f));
+  const entryName = (p: PlannedInput) => (p.bundle && bundles.length > 1 && zipOut ? `${stem(p.bundle)}/${p.entryPath}` : p.entryPath);
+  const outputs = report.files.filter((f) => f.output && byInput.has(f.input));
+
+  if (zipOut) {
+    const entries = outputs.map((f) => ({ entryName: entryName(byInput.get(f.input)!), filePath: f.output!, f }));
+    await writeZip(zipOut, entries);
+    for (const e of entries) e.f.output = `${zipOut}!${e.entryName}`;
+    return;
+  }
+  for (const bundle of bundles) {
+    const target = join(outDir, stem(bundle) + suffix + '.zip');
+    const mine = outputs.filter((f) => byInput.get(f.input)!.bundle?.toLowerCase() === bundle.toLowerCase());
+    await writeZip(target, mine.map((f) => ({ entryName: byInput.get(f.input)!.entryPath, filePath: f.output! })));
+    for (const f of mine) f.output = `${target}!${byInput.get(f.input)!.entryPath}`;
+  }
+  for (const f of outputs.filter((f) => !byInput.get(f.input)!.bundle)) {
+    const dest = join(outDir, basename(f.output!));
+    await moveFile(f.output!, dest);
+    f.output = dest;
+  }
 }
 
 const bytes = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)} GB` : n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.round(n / 1e3)} KB`);
@@ -170,6 +225,7 @@ async function runAnonymize(a: Args, isRestore: boolean): Promise<number> {
   }
   const forced = a.value('-f', '--format');
   const reportPath = a.value('--report');
+  const zipOut = a.value('--zip');
   const recursive = a.flag('-r', '--recursive');
   const noAudit = a.flag('--no-audit');
   a.ensureNoUnknown();
@@ -178,16 +234,30 @@ async function runAnonymize(a: Args, isRestore: boolean): Promise<number> {
   if (mappingOut && mappingIn && resolve(mappingOut) === resolve(mappingIn))
     throw new UsageError('write the updated mapping to a new file rather than over --use-mapping');
 
-  const inputs = await expand(a.positional, recursive, forced);
-  if (inputs.length === 0) throw new UsageError('no recognizable input files (use --format to force one)');
-  for (const i of inputs) {
-    const out = resolve(outDir, basename(i.source.name));
-    if (out === i.source.name) throw new Error(`Refusing to overwrite the input file ${i.source.name}`);
-  }
+  const closers: (() => Promise<void>)[] = [];
+  const work = mkdtempSync(join(tmpdir(), 'gridanon-'));
+  let r: RunResult;
+  try {
+    const planned = await expand(a.positional, recursive, forced, closers);
+    if (planned.length === 0) throw new UsageError('no recognizable input files (use --format to force one)');
+    const inputs = planned.map((p) => p.input);
+    for (const p of planned) {
+      if (p.bundle) continue;
+      const out = resolve(outDir, basename(p.input.source.name));
+      if (out === p.input.source.name) throw new Error(`Refusing to overwrite the input file ${p.input.source.name}`);
+    }
+    const staging = zipOut !== undefined || planned.some((p) => p.bundle);
+    const engineOut = staging ? join(work, 'out') : outDir;
 
-  const mapping = mappingIn ? parseMapping(readFileSync(mappingIn, 'utf8'), mappingIn) : undefined;
-  const opts = { profile, salt, mapping, audit: !noAudit, log: quiet ? undefined : (s: string) => console.error('  ' + s) };
-  const r = isRestore ? await restore(inputs, dirTarget(outDir), opts) : await anonymize(inputs, dirTarget(outDir), opts);
+    const mapping = mappingIn ? parseMapping(readFileSync(mappingIn, 'utf8'), mappingIn) : undefined;
+    const opts = { profile, salt, mapping, audit: !noAudit, log: quiet ? undefined : (s: string) => console.error('  ' + s) };
+    r = isRestore ? await restore(inputs, dirTarget(engineOut), opts) : await anonymize(inputs, dirTarget(engineOut), opts);
+    if (staging) await packageBundles(r.report, planned, outDir, zipOut, isRestore ? '_restored' : '_anonymized');
+  } finally {
+    for (const c of closers) await c().catch(() => {});
+    // Staged outputs are copies of the user's models: never leave them behind.
+    rmSync(work, { recursive: true, force: true });
+  }
 
   if (mappingOut) {
     mkdirSync(dirname(resolve(mappingOut)), { recursive: true });
@@ -227,7 +297,7 @@ export async function main(argv: string[]): Promise<number> {
       case 'restore': return await runAnonymize(a, true);
       case 'audit': return await runAudit(a);
       case 'formats':
-        for (const h of formats) console.log(`  ${h.id.padEnd(6)} ${h.description}  [${h.extensions.join(' ')}]`);
+        for (const h of formats) console.log(`  ${h.id.padEnd(8)} ${h.description}  [${h.extensions.join(' ')}]`);
         return 0;
       case 'profile': {
         if ((a.positional[0] ?? 'init') !== 'init') throw new UsageError('usage: gridanon profile init [file]');
@@ -248,7 +318,7 @@ export async function main(argv: string[]): Promise<number> {
         throw new UsageError(`Unknown command '${argv[0]}'. Run \`gridanon --help\`.`);
     }
   } catch (e) {
-    if (e instanceof UsageError || e instanceof NotSupportedError || e instanceof Error) {
+    if (e instanceof UsageError || e instanceof NotSupportedError || e instanceof ZipError || e instanceof Error) {
       console.error('error: ' + e.message);
       return 1;
     }

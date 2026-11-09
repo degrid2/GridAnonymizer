@@ -10,12 +10,16 @@ import namesOnly from '../../profiles/names-only.json?raw';
 import vendorStrict from '../../profiles/vendor-strict.json?raw';
 import sampleCgmes from '../../samples/cim/cgmes_eq_uuid.xml?raw';
 import sampleCim from '../../samples/cim/sample-network.xml?raw';
+import sampleCon from '../../samples/psse/meridian_v33.con?raw';
+import sampleMon from '../../samples/psse/meridian_v33.mon?raw';
 import sampleV33 from '../../samples/psse/meridian_v33.raw?raw';
+import sampleSub from '../../samples/psse/meridian_v33.sub?raw';
 import sampleV35 from '../../samples/psse/meridian_v35.raw?raw';
 import sampleCsv from '../../samples/psse/study_results.csv?raw';
 import { defaultProfile, loadProfile, profileToJson } from '../core/profile.ts';
 import type { FileReport } from '../core/shared.ts';
 import { VERSION } from '../core/version.ts';
+import { blobAccess, listZip, readEntry } from '../core/zip.ts';
 import { createBackend, type RunOptions } from './backend.ts';
 import type { WorkerOut } from './worker.ts';
 
@@ -57,10 +61,17 @@ const PROFILES: Record<string, string> = {
 
 const SAMPLES: [string, string][] = [
   ['sample-network.xml', sampleCim], ['cgmes_eq_uuid.xml', sampleCgmes], ['meridian_v33.raw', sampleV33],
-  ['meridian_v35.raw', sampleV35], ['study_results.csv', sampleCsv],
+  ['meridian_v35.raw', sampleV35], ['meridian_v33.con', sampleCon], ['meridian_v33.mon', sampleMon],
+  ['meridian_v33.sub', sampleSub], ['study_results.csv', sampleCsv],
 ];
 
-const FORMAT_NAMES: Record<string, string> = { cim: 'CIM / CGMES', psse: 'PSS®E RAW', text: 'Text', skip: 'Skip' };
+const FORMAT_NAMES: Record<string, string> = { cim: 'CIM / CGMES', psse: 'PSS®E RAW', 'psse-aux': 'PSS®E companion', text: 'Text', skip: 'Skip' };
+
+/** The parts of a PSS®E set. Only the case is needed; the others follow it. */
+const PSSE_ROLES: { ext: string; label: string }[] = [
+  { ext: '.raw', label: 'Case' }, { ext: '.con', label: 'Contingencies' }, { ext: '.mon', label: 'Monitored elements' },
+  { ext: '.sub', label: 'Subsystems' }, { ext: '.aux', label: 'Auxiliary' },
+];
 
 const STAT_NAMES: Record<string, [string, string]> = {
   names: ['name', 'names'], ids: ['id', 'ids'], refs: ['reference', 'references'], mrids: ['mRID', 'mRIDs'],
@@ -70,6 +81,7 @@ const STAT_NAMES: Record<string, [string, string]> = {
   replacements: ['replacement', 'replacements'], unmappedRefs: ['unmapped reference', 'unmapped references'],
   externalIds: ['external id', 'external ids'], unmappedBusRefs: ['unmapped bus reference', 'unmapped bus references'],
   trailerLinesDropped: ['trailing line dropped', 'trailing lines dropped'],
+  labels: ['label', 'labels'], rangesExpanded: ['bus range expanded', 'bus ranges expanded'],
 };
 
 // ── state ───────────────────────────────────────────────────────────────────
@@ -77,6 +89,10 @@ const STAT_NAMES: Record<string, [string, string]> = {
 type View = 'anonymize' | 'restore' | 'settings';
 let workView: 'anonymize' | 'restore' = 'anonymize';
 let files: File[] = [];
+/** Per file: its path in the set. A zip's entries keep their folders ("case/x.raw"). */
+let paths: string[] = [];
+/** Per file: the zip it came from, if any. */
+let bundles: (string | undefined)[] = [];
 let formats: string[] = [];
 let customProfile: { name: string; json: string } | undefined;
 let blobUrls: string[] = [];
@@ -94,7 +110,7 @@ function setView(next: View) {
   $('view-settings').hidden = next !== 'settings';
   const restoring = workView === 'restore';
   $('drop-title').textContent = files.length ? 'Add more files' : restoring ? 'Drop anonymized files' : 'Drop model files';
-  $('drop-hint').textContent = restoring ? 'Vendor results, contingency lists or the anonymized model' : 'CIM/CGMES, PSS®E RAW and companion CSVs';
+  $('drop-hint').textContent = restoring ? 'Vendor results, contingency lists or the anonymized model, as files or a .zip' : DROP_HINT;
   $('quick').hidden = restoring;
   refresh();
 }
@@ -116,18 +132,57 @@ for (const v of ['anonymize', 'restore', 'settings'] as const) $(`tab-${v}`).add
 const drop = $('drop');
 const picker = $<HTMLInputElement>('picker');
 
+const DROP_HINT = 'CIM/CGMES, PSS®E .raw with its .con .mon .sub files, CSVs, or one .zip of them';
+const stem = (name: string) => basename(name).replace(/\.[^.]*$/, '');
+
+interface Incoming { file: File; path: string; bundle?: string }
+
+/** Unpack dropped zips here, in the page: their entries become files that remember their folder. */
+async function unpack(next: File[]): Promise<Incoming[]> {
+  const out: Incoming[] = [];
+  for (const f of next) {
+    if (!f.name.toLowerCase().endsWith('.zip')) { out.push({ file: f, path: f.name }); continue; }
+    const access = blobAccess(f);
+    for (const e of await listZip(access, f.name)) {
+      const parts: Uint8Array[] = [];
+      for await (const c of readEntry(access, e, f.name)) parts.push(c);
+      out.push({ file: new File(parts as BlobPart[], basename(e.path)), path: e.path, bundle: f.name });
+    }
+  }
+  return out;
+}
+
+/** Keep paths unique: a clash from a zip moves under the zip's name, anything else gets " (2)". */
+function uniquePath(it: Incoming, taken: Set<string>): string {
+  let p = it.path;
+  if (taken.has(p.toLowerCase()) && it.bundle) p = `${stem(it.bundle)}/${it.path}`;
+  for (let n = 2; taken.has(p.toLowerCase()); n++) p = it.path.replace(/(\.[^./]*)?$/, ` (${n})$1`);
+  taken.add(p.toLowerCase());
+  return p;
+}
+
 async function addFiles(next: File[]) {
-  const fresh = next.filter((f) => !files.some((g) => g.name === f.name && g.size === f.size));
+  let incoming: Incoming[];
+  try {
+    incoming = await unpack(next);
+  } catch (e) {
+    showNotice(`Could not open the zip: ${(e as Error).message}`);
+    return;
+  }
+  const fresh = incoming.filter((it) => !files.some((g, i) => (paths[i] === it.path || paths[i].endsWith('/' + it.path)) && g.size === it.file.size && bundles[i] === it.bundle));
   if (fresh.length === 0) return;
   let detected: (string | null)[];
   try {
-    detected = await backend.detect([...files, ...fresh]);
+    detected = await backend.detect([...files, ...fresh.map((it) => it.file)]);
   } catch (e) {
     showNotice(`Could not read the files: ${(e as Error).message}`);
     return;
   }
   const kept = new Map(files.map((f, i) => [f, formats[i]]));
-  files = [...files, ...fresh];
+  const taken = new Set(paths.map((p) => p.toLowerCase()));
+  files = [...files, ...fresh.map((it) => it.file)];
+  paths = [...paths, ...fresh.map((it) => uniquePath(it, taken))];
+  bundles = [...bundles, ...fresh.map((it) => it.bundle)];
   formats = files.map((f, i) => kept.get(f) ?? detected[i] ?? 'skip');
   clearResults();
   renderFiles();
@@ -136,10 +191,50 @@ async function addFiles(next: File[]) {
 
 function removeFile(i: number) {
   files.splice(i, 1);
+  paths.splice(i, 1);
+  bundles.splice(i, 1);
   formats.splice(i, 1);
   clearResults();
   renderFiles();
   setView(workView);
+}
+
+/** Which part of a PSS®E set a file is, or undefined when it is not one. */
+function psseRole(i: number): string | undefined {
+  if (formats[i] === 'psse') return '.raw';
+  if (formats[i] !== 'psse-aux') return undefined;
+  const ext = paths[i].slice(paths[i].lastIndexOf('.')).toLowerCase();
+  return PSSE_ROLES.some((r) => r.ext === ext) ? ext : '.aux';
+}
+
+/** The PSS®E set panel: what is there, and one click to add a missing part. */
+function renderSet() {
+  const panel = $('psse-set');
+  const roles = files.map((_, i) => psseRole(i));
+  panel.hidden = workView === 'restore' || showingResults || !roles.some(Boolean);
+  if (panel.hidden) return;
+  const chips = $('psse-chips');
+  chips.replaceChildren();
+  for (const r of PSSE_ROLES) {
+    const mine = paths.filter((_, i) => roles[i] === r.ext);
+    if (mine.length) {
+      const chip = el('span', { className: 'chip on' }, el('span', { className: 'tick', textContent: '✓' }), r.label);
+      chip.title = mine.join('\n');
+      if (mine.length > 1) chip.append(el('small', { textContent: ` ×${mine.length}` }));
+      chips.append(chip);
+    } else {
+      const add = el('button', { type: 'button', className: `chip add${r.ext === '.raw' ? ' need' : ''}`, textContent: `+ ${r.label} ${r.ext}` });
+      add.setAttribute('aria-label', `Add ${r.label.toLowerCase()} (${r.ext})`);
+      add.addEventListener('click', () => { picker.accept = r.ext; picker.click(); });
+      chips.append(add);
+    }
+  }
+  const hasCase = roles.includes('.raw');
+  const note = $('psse-note');
+  note.className = hasCase ? 'hint' : 'hint warn-text';
+  note.textContent = hasCase
+    ? 'Anonymized together, so bus numbers and names match across the set.'
+    : 'Add the case (.raw): the other files take their bus numbers and names from it.';
 }
 
 function renderFiles() {
@@ -150,14 +245,16 @@ function renderFiles() {
   $('sample-line').hidden = files.length > 0;
   files.forEach((f, i) => {
     const sel = el('select', { title: 'Format' });
-    sel.setAttribute('aria-label', `Format of ${f.name}`);
-    for (const id of ['cim', 'psse', 'text', 'skip']) sel.append(el('option', { value: id, textContent: FORMAT_NAMES[id] }));
+    sel.setAttribute('aria-label', `Format of ${paths[i]}`);
+    for (const id of ['cim', 'psse', 'psse-aux', 'text', 'skip']) sel.append(el('option', { value: id, textContent: FORMAT_NAMES[id] }));
     sel.value = formats[i];
-    const li = el('li', { className: formats[i] === 'skip' ? 'skipped' : '' },
-      el('span', { className: 'name', textContent: f.name }), sel, el('span', { className: 'size', textContent: fmtBytes(f.size) }));
+    const name = el('span', { className: 'name' });
+    if (bundles[i]) name.append(el('span', { className: 'from', textContent: `${basename(bundles[i]!)} › ` }));
+    name.append(paths[i]);
+    const li = el('li', { className: formats[i] === 'skip' ? 'skipped' : '' }, name, sel, el('span', { className: 'size', textContent: fmtBytes(f.size) }));
     sel.addEventListener('change', () => { formats[i] = sel.value; li.className = sel.value === 'skip' ? 'skipped' : ''; refresh(); });
-    const rm = el('button', { className: 'remove', type: 'button', textContent: '×', title: `Remove ${f.name}` });
-    rm.setAttribute('aria-label', `Remove ${f.name}`);
+    const rm = el('button', { className: 'remove', type: 'button', textContent: '×', title: `Remove ${paths[i]}` });
+    rm.setAttribute('aria-label', `Remove ${paths[i]}`);
     rm.addEventListener('click', () => removeFile(i));
     li.append(rm);
     list.append(li);
@@ -166,7 +263,10 @@ function renderFiles() {
 
 drop.addEventListener('click', () => picker.click());
 drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); picker.click(); } });
-picker.addEventListener('change', () => { void addFiles([...(picker.files ?? [])]); picker.value = ''; });
+picker.addEventListener('change', () => { void addFiles([...(picker.files ?? [])]); picker.value = ''; picker.accept = ''; });
+// A cancelled "Add …" picker must not leave its filter on the next one.
+picker.addEventListener('cancel', () => { picker.accept = ''; });
+drop.addEventListener('click', () => { picker.accept = ''; }, { capture: true });
 for (const ev of ['dragenter', 'dragover']) drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); });
 for (const ev of ['dragleave', 'drop']) drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); });
 drop.addEventListener('drop', (e) => { const dt = (e as DragEvent).dataTransfer; if (dt?.files.length) void addFiles([...dt.files]); });
@@ -256,6 +356,7 @@ function refresh() {
   run.textContent = running ? (restoring ? 'Restoring…' : 'Anonymizing…') : usable > 1 ? `${verb} ${usable} files` : verb;
   run.disabled = running || usable === 0 || (restoring && !$<HTMLInputElement>('mapping-in').files?.length);
   $('restore-mapping').hidden = !restoring || files.length === 0 || showingResults;
+  renderSet();
 
   const on = restoring ? [] : activeSettings();
   const line = $('active-settings');
@@ -276,6 +377,8 @@ function clearResults() {
 
 function startOver() {
   files = [];
+  paths = [];
+  bundles = [];
   formats = [];
   clearResults();
   renderFiles();
@@ -304,7 +407,7 @@ function blobLink(blob: Blob, name: string, text: string, id?: string): HTMLAnch
 
 function summary(r: FileReport): string {
   const parts = [FORMAT_NAMES[r.format] ?? r.format];
-  for (const k of ['names', 'busNumbers', 'ids', 'replacements'].filter((key) => r.stats[key]).slice(0, 2))
+  for (const k of ['names', 'busNumbers', 'labels', 'ids', 'replacements'].filter((key) => r.stats[key]).slice(0, 2))
     parts.push(plural(r.stats[k], STAT_NAMES[k][0], STAT_NAMES[k][1]));
   return parts.join(', ');
 }
@@ -365,10 +468,17 @@ $('run').addEventListener('click', async () => {
   }
   const mappingFile = restoring ? $<HTMLInputElement>('mapping-in').files?.[0] : $<HTMLInputElement>('mapping-continue').files?.[0];
   const typedSalt = $<HTMLInputElement>('salt').value.trim();
-  const keep = files.map((f, i) => [f, formats[i]] as const).filter(([, f]) => f !== 'skip');
+  const keep = files.map((f, i) => [f, formats[i], i] as const).filter(([, f]) => f !== 'skip');
+  // More than one result, or a zip in: everything also comes back as one zip, original names inside.
+  const suffix = restoring ? '_restored' : '_anonymized';
+  const fromZips = [...new Set(keep.map(([, , i]) => bundles[i]))];
+  const zipName = directory || (keep.length < 2 && !fromZips[0]) ? undefined
+    : fromZips.length === 1 && fromZips[0] ? `${stem(fromZips[0])}${suffix}.zip` : `gridanon${suffix}.zip`;
   const opts: RunOptions = {
     mode: restoring ? 'restore' : 'anonymize',
     formats: keep.map(([, f]) => f),
+    paths: keep.map(([, , i]) => paths[i]),
+    zipName,
     profileJson: currentProfileJson(),
     overrides: {
       renumberBuses: check('renumber').checked,
@@ -426,11 +536,14 @@ $('run').addEventListener('click', async () => {
       );
       showWorkspace(false);
       const foot = el('div', { className: 'result-foot' });
-      if (downloadable > 1) {
+      if (msg.zip?.blob) foot.append(blobLink(msg.zip.blob, msg.zip.name, `Download all as ${msg.zip.name}`, 'dl-zip'));
+      else if (msg.zip?.url) foot.append(el('a', { href: msg.zip.url, download: msg.zip.name, textContent: `Download all as ${msg.zip.name}`, className: 'secondary', id: 'dl-zip' }));
+      else if (downloadable > 1) {
         const all = el('button', { type: 'button', className: 'secondary', textContent: `Download all ${downloadable}` });
         all.addEventListener('click', () => list.querySelectorAll<HTMLAnchorElement>('a.download').forEach((a, i) => setTimeout(() => a.click(), i * 250)));
         foot.append(all);
       }
+      foot.querySelector('#dl-zip')?.classList.add('strong');
       if (!restoring && check('mapping').checked)
         foot.append(blobLink(new Blob([msg.mapping], { type: 'application/json' }), 'gridanon_mapping.json', 'Download mapping', 'dl-mapping'));
       if (foot.childElementCount) results.append(foot);
@@ -526,6 +639,14 @@ const HELP: Record<string, { name: string; body: string[] }> = {
     body: [
       'Keeps suffixes such as _CC, _GT, _HYDRO or _WIND on renamed generating units, which can help a study.',
       'Off by default: plant type, size and region together can identify a specific plant.',
+    ],
+  },
+  'psse-set': {
+    name: 'PSS®E sets',
+    body: [
+      'A PSS®E study is often a case (.raw) plus contingencies (.con), monitored elements (.mon), subsystems (.sub) or other auxiliary files. Only the case is needed.',
+      'Drop them together, as files or as one .zip. The companion files are anonymized after the case and reuse its pseudonyms: renumbered buses, names and labels such as contingency names all match.',
+      'A zip comes back as a zip with the same folders and file names inside. Several files come back as one zip too.',
     ],
   },
   tofolder: {

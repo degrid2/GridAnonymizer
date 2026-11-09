@@ -14,7 +14,8 @@ public sealed class TextHandler : IFormatHandler
 {
     public string Id => "text";
     public string Description => "Any text file: applies the run's name/id mapping (whole-word, longest match first)";
-    public IReadOnlyList<string> Extensions { get; } = [".csv", ".txt", ".con", ".mon", ".sub", ".log", ".json", ".py", ".idv"];
+    public IReadOnlyList<string> Extensions { get; } = [".csv", ".txt", ".log", ".json", ".py", ".idv"];
+    public int Phase => 2;
     public bool Sniff(string head) => false;
     public IFormatJob CreateJob(JobContext context) => new TextJob(context);
 }

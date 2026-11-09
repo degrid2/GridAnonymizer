@@ -4,6 +4,16 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Added
+- PSS®E companion files (`psse-aux` format): `.con`, `.mon`, `.sub` and `.aux` files run after the case and follow it. Bus numbers are renumbered with the case, `BUSES a TO b` ranges are expanded, extended bus names follow the case, and labels (contingencies, subsystems, interfaces…) get pseudonyms that also reach result CSVs. Warnings for buses missing from the case, and for renumbering without the case.
+- Zip bundles: a `.zip` input comes back as `<name>_anonymized.zip` with the same folders and original file names inside; `--zip <file>` packs a run's outputs into one archive. Zip slip and macOS metadata are handled; no new dependencies (the TypeScript edition has its own small streaming zip reader and writer).
+- UI: drop a `.zip` or several files; a **PSS®E set** panel shows the case and its optional parts and adds a missing one in a click; *Download all as …zip* returns everything in one zip. `gridanon ui` also writes that zip to its output folder.
+- The sample set includes `meridian_v33.con`, `.mon` and `.sub`.
+
+### Changed
+- `.con`, `.mon` and `.sub` are no longer treated as plain text: they use the `psse-aux` format.
+- Engine: formats run in phases (models, then PSS®E companions, then text); inputs can carry a relative folder that their outputs keep.
+
 ## [2.0.0] - 2026-11-07
 
 Two editions of one engine: a new C#/.NET command-line tool and library, and the v1 TypeScript browser tool upgraded to the same feature set (plus an offline single-file page and a Node CLI). Both produce byte-identical output; CI enforces it.
