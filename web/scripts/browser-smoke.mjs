@@ -146,6 +146,12 @@ try {
     if (JSON.stringify(await zipContents(zipPath)) !== JSON.stringify(expectedZip)) fail(`${label}: the zip's entries differ from the CLI's`);
 
     const after = requests.slice(initialRequests);
+
+    // Settings remembered from an earlier visit must not break start-up (a saved profile once did).
+    await page.evaluate(() => localStorage.setItem('gridanon.profile', 'vendor-strict'));
+    await page.reload();
+    await page.waitForSelector('.help-btn', { state: 'attached', timeout: 10000 }).catch(() => fail(`${label}: page did not start with a saved profile`));
+    if ((await page.$eval('#profile', (e) => e.value)) !== 'vendor-strict') fail(`${label}: saved profile not restored`);
     if (label.startsWith('.NET')) {
       // The .NET page talks to its own loopback server, and to nothing else.
       const origin = new URL(url).origin;

@@ -325,8 +325,6 @@ $('profile-dl').addEventListener('click', () => {
   const a = el('a', { href: URL.createObjectURL(new Blob([currentProfileJson()], { type: 'application/json' })), download: `${profileSelects[0].value}-profile.json` });
   a.click();
 });
-const savedProfile = store.get('profile');
-if (savedProfile && PROFILES[savedProfile]) setProfile(savedProfile);
 describeProfile();
 
 const redactTerms = () => $<HTMLTextAreaElement>('redact').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
@@ -739,4 +737,7 @@ if (isDotnet) {
   $('dotnet-out-path').textContent = backend.outputDir ?? '';
 }
 
+// Restore the saved profile last: setProfile() refreshes the page, which needs everything above.
+const savedProfile = store.get('profile');
+if (savedProfile && PROFILES[savedProfile]) setProfile(savedProfile);
 setView('anonymize');

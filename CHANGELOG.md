@@ -9,10 +9,14 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 - Zip bundles: a `.zip` input comes back as `<name>_anonymized.zip` with the same folders and original file names inside; `--zip <file>` packs a run's outputs into one archive. Zip slip and macOS metadata are handled; no new dependencies (the TypeScript edition has its own small streaming zip reader and writer).
 - UI: drop a `.zip` or several files; a **PSS®E set** panel shows the case and its optional parts and adds a missing one in a click; *Download all as …zip* returns everything in one zip. `gridanon ui` also writes that zip to its output folder.
 - The sample set includes `meridian_v33.con`, `.mon` and `.sub`.
+- `build.ps1` at the root builds one or both editions, optionally runs the tests and starts the UI.
 
 ### Changed
 - `.con`, `.mon` and `.sub` are no longer treated as plain text: they use the `psse-aux` format.
 - Engine: formats run in phases (models, then PSS®E companions, then text); inputs can carry a relative folder that their outputs keep.
+
+### Fixed
+- The page stopped working (Anonymize did nothing, no help buttons) when a profile chosen on an earlier visit was restored at start-up.
 
 ## [2.0.0] - 2026-11-07
 
