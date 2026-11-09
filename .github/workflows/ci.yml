@@ -36,7 +36,7 @@ jobs:
           ./out/${{ matrix.exe }} anonymize samples/cim samples/psse --renumber-buses --salt ci -o anon -m anon/map.json
           ./out/${{ matrix.exe }} restore anon/study_results_anonymized.csv --mapping anon/map.json -o back
           diff <(tr -d '\r' < samples/psse/study_results.csv) <(tr -d '\r' < back/study_results_anonymized_restored.csv)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gridanon-${{ matrix.rid }}
           path: dotnet/out/${{ matrix.exe }}

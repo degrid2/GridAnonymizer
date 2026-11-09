@@ -35,7 +35,7 @@ jobs:
           dotnet publish src/GridAnonymizer.Cli -c Release -r ${{ matrix.rid }} -p:Version=$VERSION -o pub
           mkdir pkg && cp pub/${{ matrix.exe }} README.md LICENSE pkg/ && cp -r profiles pkg/
           pwsh -NoProfile -Command "Compress-Archive -Path pkg/* -DestinationPath ../gridanon-$VERSION-${{ matrix.rid }}.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dotnet-${{ matrix.rid }}
           path: gridanon-*.zip
@@ -63,7 +63,7 @@ jobs:
           cp dist-cli/gridanon.mjs ../out/gridanon-node-$VERSION.mjs
           mkdir site && cp -r dist/. site/ && rm -f site/gridanon-web.html site/assets/*.map && cp server.mjs site/
           (cd site && zip -qr ../../out/gridanon-web-site-$VERSION.zip .)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web
           path: out/*
