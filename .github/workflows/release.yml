@@ -1,0 +1,102 @@
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  dotnet:
+    name: .NET edition (${{ matrix.rid }})
+    strategy:
+      matrix:
+        include:
+          - { os: windows-latest,   rid: win-x64,     exe: gridanon.exe }
+          - { os: windows-11-arm,   rid: win-arm64,   exe: gridanon.exe }
+          - { os: ubuntu-latest,    rid: linux-x64,   exe: gridanon }
+          - { os: ubuntu-24.04-arm, rid: linux-arm64, exe: gridanon }
+          - { os: macos-latest,     rid: osx-arm64,   exe: gridanon }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: dotnet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: dotnet/global.json
+      - run: dotnet test -c Release
+      - name: Publish and package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          dotnet publish src/GridAnonymizer.Cli -c Release -r ${{ matrix.rid }} -p:Version=$VERSION -o pub
+          mkdir pkg && cp pub/${{ matrix.exe }} README.md LICENSE pkg/ && cp -r profiles pkg/
+          pwsh -NoProfile -Command "Compress-Archive -Path pkg/* -DestinationPath ../gridanon-$VERSION-${{ matrix.rid }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-${{ matrix.rid }}
+          path: gridanon-*.zip
+
+  web:
+    name: TypeScript edition
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium && npm run test:browser
+      - name: Package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p ../out
+          cp dist/gridanon-web.html ../out/gridanon-web.html
+          cp dist-cli/gridanon.mjs ../out/gridanon-node-$VERSION.mjs
+          mkdir site && cp -r dist/. site/ && rm -f site/gridanon-web.html site/assets/*.map && cp server.mjs site/
+          (cd site && zip -qr ../../out/gridanon-web-site-$VERSION.zip .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: out/*
+
+  publish:
+    needs: [dotnet, web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: dotnet/global.json
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Source zip of each edition (each folder is self-contained)
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git archive --format zip --prefix "gridanon-dotnet-$VERSION/" -o "dist/gridanon-dotnet-src-$VERSION.zip" HEAD:dotnet
+          git archive --format zip --prefix "gridanon-web-$VERSION/" -o "dist/gridanon-web-src-$VERSION.zip" HEAD:web
+      - name: NuGet packages
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          dotnet pack dotnet/src/GridAnonymizer.Core -c Release -p:Version=$VERSION -o dist
+          dotnet pack dotnet/src/GridAnonymizer.Cli  -c Release -p:Version=$VERSION -o dist
+      - run: cd dist && sha256sum * > SHA256SUMS
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+      - name: Push to NuGet
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        if: env.NUGET_API_KEY != ''
+        run: dotnet nuget push "dist/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate

@@ -1,0 +1,5 @@
+- [ ] Tests added or updated in BOTH editions (`dotnet test`, `npm test`)
+- [ ] Parity holds (`npm run test:parity` with the .NET binary)
+- [ ] No new runtime dependencies (either edition)
+- [ ] No real models in samples or test data
+- [ ] CHANGELOG.md updated under *Unreleased*

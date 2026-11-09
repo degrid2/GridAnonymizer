@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The `gridanon` command-line tool. Ships two ways:
+      * dotnet tool:   dotnet tool install -g GridAnonymizer   (needs the .NET runtime)
+      * native binary: dotnet publish -c Release -r win-x64    (Native AOT, no runtime needed)
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>gridanon</AssemblyName>
+    <RootNamespace>GridAnonymizer.Cli</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>gridanon</ToolCommandName>
+    <PackageId>GridAnonymizer</PackageId>
+    <Description>gridanon: anonymize CIM/CGMES and PSS/E RAW network models locally, with a built-in leak audit and a private reversible mapping.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <!-- Native AOT only when publishing for a specific runtime; `dotnet pack` stays a portable tool. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <PublishAot>true</PublishAot>
+    <StripSymbols>true</StripSymbols>
+    <OptimizationPreference>Size</OptimizationPreference>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The page served by `gridanon ui`. Built from the TypeScript edition's UI and committed,
+         so this project builds without Node: see docs/ui.md. -->
+    <EmbeddedResource Include="wwwroot/**" LogicalName="wwwroot/%(RecursiveDir)%(Filename)%(Extension)" />
+    <InternalsVisibleTo Include="GridAnonymizer.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../GridAnonymizer.Core/GridAnonymizer.Core.csproj" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>

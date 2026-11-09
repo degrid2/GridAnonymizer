@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+<title>GridAnonymizer</title>
+<meta name="description" content="Anonymize CIM/CGMES and PSS/E network models. Names, ids and bus numbers are replaced; electrical data is kept exactly. Nothing leaves your computer." />
+<link rel="stylesheet" href="./src/app/style.css" />
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+    <div>
+      <h1>GridAnonymizer</h1>
+      <p class="tagline" id="tagline">Anonymize CIM and PSS®E models. Nothing leaves this computer.</p>
+    </div>
+  </div>
+  <div class="top-right">
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab" role="tab" id="tab-anonymize" aria-controls="view-anonymize" aria-selected="true" type="button">Anonymize</button>
+    <button class="tab" role="tab" id="tab-restore" aria-controls="view-restore" aria-selected="false" type="button">Restore</button>
+    <button class="tab" role="tab" id="tab-settings" aria-controls="view-settings" aria-selected="false" type="button">Settings</button>
+  </nav>
+  <button type="button" class="help-open" id="help-open">Help</button>
+  </div>
+</header>
+
+<main>
+  <noscript><p class="notice">GridAnonymizer needs JavaScript. All processing happens on this computer.</p></noscript>
+
+  <!-- ── Anonymize / Restore share one workspace ─────────────────────────── -->
+  <section id="view-work" class="view" aria-labelledby="tab-anonymize">
+    <div id="drop" class="drop" tabindex="0" role="button" aria-describedby="drop-hint">
+      <svg class="drop-icon" viewBox="0 0 48 48" aria-hidden="true"><path d="M24 31V11m0 0-8 8m8-8 8 8M10 30v6a2 2 0 0 0 2 2h24a2 2 0 0 0 2-2v-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <p class="drop-title" id="drop-title">Drop model files</p>
+      <p class="drop-hint" id="drop-hint">CIM/CGMES, PSS®E RAW and companion CSVs</p>
+      <input id="picker" type="file" multiple hidden />
+    </div>
+    <p class="sample-line" id="sample-line">No files to hand? <button type="button" class="link" data-sample="all">Try the sample set</button></p>
+
+    <ul id="files" class="files" hidden aria-label="Files"></ul>
+
+    <div id="restore-mapping" class="field-inline" hidden>
+      <label for="mapping-in" data-help="restore-mapping">Mapping file</label>
+      <div class="file-pick">
+        <input id="mapping-in" type="file" accept=".json" />
+        <span class="hint">The private file saved when these were anonymized.</span>
+      </div>
+    </div>
+
+    <div class="actionbar" id="actionbar" hidden>
+      <div class="quick" id="quick">
+        <label class="select-wrap">
+          <span class="sr">Profile</span>
+          <select id="profile" aria-label="Profile" data-help="profile">
+            <option value="default">Standard</option>
+            <option value="vendor-strict">Vendor strict</option>
+            <option value="cgmes-boundary">CGMES boundary</option>
+            <option value="names-only">Names only</option>
+            <option value="custom">Custom profile…</option>
+          </select>
+        </label>
+        <label class="switch" data-help="renumber"><input type="checkbox" id="renumber" /><span>Renumber buses</span></label>
+        <label class="switch" data-help="mapping"><input type="checkbox" id="mapping" /><span>Save mapping</span></label>
+      </div>
+      <button id="run" class="primary" type="button" disabled>Anonymize</button>
+    </div>
+    <div id="quick-help"></div>
+    <p class="active-settings" id="active-settings" hidden></p>
+
+    <div class="progress" id="progress" hidden>
+      <div class="phase-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+      <p id="progress-label" class="hint"></p>
+    </div>
+
+    <section id="results" class="results" hidden aria-live="polite"></section>
+  </section>
+
+  <!-- ── Settings ────────────────────────────────────────────────────────── -->
+  <section id="view-settings" class="view settings" hidden aria-labelledby="tab-settings">
+    <div class="group">
+      <h2>Profile</h2>
+      <div class="row">
+        <div class="row-text"><p class="row-title" data-help="profile">Rules</p><p class="hint" id="profile-desc"></p></div>
+        <div class="row-control">
+          <select id="profile-settings" aria-label="Profile">
+            <option value="default">Standard</option>
+            <option value="vendor-strict">Vendor strict</option>
+            <option value="cgmes-boundary">CGMES boundary</option>
+            <option value="names-only">Names only</option>
+            <option value="custom">Custom profile…</option>
+          </select>
+          <input id="profile-file" type="file" accept=".json,.jsonc" hidden />
+          <button id="profile-dl" class="link" type="button">Download as JSON</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>Consistency</h2>
+      <div class="row">
+        <label class="row-text" for="salt"><span class="row-title" data-help="salt">Salt</span><span class="hint">Same salt, same pseudonyms. Empty picks a random one.</span></label>
+        <div class="row-control"><input id="salt" type="text" spellcheck="false" autocomplete="off" placeholder="Random" /></div>
+      </div>
+      <div class="row">
+        <label class="row-text" for="mapping-continue"><span class="row-title" data-help="continue">Continue from mapping</span><span class="hint">Give a new revision the same pseudonyms as before.</span></label>
+        <div class="row-control"><input id="mapping-continue" type="file" accept=".json" /></div>
+      </div>
+      <div class="row">
+        <div class="row-text"><p class="row-title" data-help="mapping">Save mapping</p><p class="hint warn-text">The mapping reverses everything. Keep it private.</p></div>
+        <div class="row-control"><label class="switch"><input type="checkbox" id="mapping-settings" /><span class="sr">Save mapping</span></label></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>Redaction</h2>
+      <div class="row">
+        <label class="row-text" for="redact"><span class="row-title" data-help="redact">Terms that must not survive</span><span class="hint">One per line, such as your company's name. Matches become REDACTED.</span></label>
+        <div class="row-control"><textarea id="redact" rows="3" spellcheck="false"></textarea></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>PSS®E</h2>
+      <div class="row">
+        <div class="row-text"><p class="row-title" data-help="renumber">Renumber buses</p><p class="hint">Everywhere a bus is referenced.</p></div>
+        <div class="row-control"><label class="switch"><input type="checkbox" id="renumber-settings" /><span class="sr">Renumber buses</span></label></div>
+      </div>
+      <div class="row">
+        <div class="row-text"><p class="row-title" data-help="titles">Keep case titles</p></div>
+        <div class="row-control"><label class="switch"><input type="checkbox" id="titles" /><span class="sr">Keep case titles</span></label></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>Output</h2>
+      <div class="row">
+        <div class="row-text"><p class="row-title" data-help="comments">Keep comments</p><p class="hint">Comments often name real assets.</p></div>
+        <div class="row-control"><label class="switch"><input type="checkbox" id="comments" /><span class="sr">Keep comments</span></label></div>
+      </div>
+      <div class="row">
+        <div class="row-text"><p class="row-title" data-help="typehints">Keep plant-type hints</p><p class="hint">Suffixes such as _CC or _HYDRO.</p></div>
+        <div class="row-control"><label class="switch"><input type="checkbox" id="typehints" /><span class="sr">Keep plant-type hints</span></label></div>
+      </div>
+      <div class="row" id="folder-row" hidden>
+        <div class="row-text"><p class="row-title" data-help="tofolder">Save straight to a folder</p><p class="hint">Streams to disk, for very large models.</p></div>
+        <div class="row-control"><label class="switch"><input type="checkbox" id="tofolder" /><span class="sr">Save straight to a folder</span></label></div>
+      </div>
+      <div class="row" id="dotnet-out" hidden>
+        <div class="row-text"><p class="row-title" data-help="outfolder">Output folder</p><p class="hint">Set with <code>gridanon ui -o &lt;folder&gt;</code>.</p></div>
+        <div class="row-control"><code id="dotnet-out-path" class="path"></code></div>
+      </div>
+    </div>
+
+    <div class="group about">
+      <h2>About</h2>
+      <p id="about-local">Files are processed in this tab. The page cannot make network requests, so nothing is uploaded.</p>
+      <p>Topology and impedances are kept exactly. Someone holding a reference model of the same grid could still recognise it, so treat the output as shareable, not public.</p>
+      <p class="hint"><span id="version"></span> <a id="releases-link" href="https://github.com/svuriti2/GridAnonymizer/releases/latest" rel="noopener noreferrer">Other editions and downloads</a></p>
+    </div>
+  </section>
+</main>
+
+<dialog id="help-dialog" class="help-dialog" aria-labelledby="help-title">
+  <div class="help-head">
+    <h2 id="help-title">How GridAnonymizer works</h2>
+    <button type="button" class="help-close" id="help-close" aria-label="Close help">×</button>
+  </div>
+  <div class="help-body">
+    <ol class="steps">
+      <li><strong>Drop your model files</strong> on the Anonymize tab. Add the files that belong together in one go, such as every profile of a CGMES set, several cases of one PSS®E system, or the CSVs that go with them, so they get the same pseudonyms.</li>
+      <li><strong>Check the format</strong> shown next to each file, and pick a profile. The Standard profile suits most sharing.</li>
+      <li><strong>Press Anonymize</strong>, then read the verdict. Green means the audit found nothing identifying in the output. Red means don't share that file; open <em>Details</em> to see what was found.</li>
+      <li><strong>Download</strong> the files, and the mapping if you'll need to read the vendor's results later.</li>
+    </ol>
+
+    <h3>What changes and what stays</h3>
+    <p>Replaced: names, ids, mRIDs, descriptions, comments, model headers, PSS®E case titles, coordinates and addresses, and optionally bus numbers. Kept exactly: topology, impedances, ratings, switch states, kV levels and shared labels such as <code>MW</code> or <code>High1</code>.</p>
+
+    <h3>Salt or mapping?</h3>
+    <p>Both make pseudonyms repeatable. The <strong>salt</strong> is a secret word: the same salt and the same files give the same output. The <strong>mapping</strong> is the full list of original-to-pseudonym pairs. Use it to restore results, or to continue with the next revision of a model. Keep both private; anyone holding the mapping can undo everything.</p>
+
+    <h3>Reading results that come back</h3>
+    <p>On the Restore tab, drop the files the vendor sent (CSV results, contingency lists, even the anonymized model) and choose the mapping. Names, ids and bus numbers are translated back to the originals.</p>
+
+    <h3>If the audit fails</h3>
+    <p>Usually a kept comment, a case title or your company's name inside free text. Open <em>Details</em> on the red file, then on the Settings tab either turn off <em>Keep comments</em> and <em>Keep case titles</em>, or add the word to <em>Terms that must not survive</em>, and run again.</p>
+
+    <h3>Privacy</h3>
+    <p id="help-privacy">Everything runs on this computer. The page is not allowed to make network requests, so your files cannot be uploaded.</p>
+  </div>
+</dialog>
+
+<script type="module" src="./src/app/main.ts"></script>
+</body>
+</html>

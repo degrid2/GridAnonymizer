@@ -1,0 +1,8 @@
+# Cloudflare Pages / Netlify header rules (container hosts use server.mjs instead).
+# connect-src 'none': the page fetches nothing after load, so no user file can leave the browser.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Cross-Origin-Opener-Policy: same-origin
+  Permissions-Policy: geolocation=(), camera=(), microphone=(), interest-cohort=()

@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/GridAnonymizer.Cli/GridAnonymizer.Cli.csproj" />
+    <Project Path="src/GridAnonymizer.Core/GridAnonymizer.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/GridAnonymizer.Tests/GridAnonymizer.Tests.csproj" />
+  </Folder>
+</Solution>

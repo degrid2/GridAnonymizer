@@ -1,0 +1,34 @@
+{
+  "name": "gridanon-web",
+  "version": "2.0.0",
+  "private": true,
+  "description": "GridAnonymizer, TypeScript edition: in-browser page, offline single-file page and a Node CLI. Zero runtime dependencies.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "bin": {
+    "gridanon-node": "dist-cli/gridanon.mjs"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run build:web && npm run build:offline && npm run build:cli",
+    "build:web": "vite build",
+    "build:offline": "node scripts/build-offline.mjs",
+    "build:cli": "vite build --config vite.cli.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
+    "test:parity": "node --experimental-strip-types --no-warnings --test test/parity.test.ts",
+    "test:browser": "node scripts/browser-smoke.mjs",
+    "cli": "node --experimental-strip-types --no-warnings cli/gridanon.ts",
+    "start": "node server.mjs",
+    "build:dotnet-ui": "vite build --mode dotnet && node scripts/copy-to-dotnet.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "playwright": "1.63.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.7"
+  }
+}

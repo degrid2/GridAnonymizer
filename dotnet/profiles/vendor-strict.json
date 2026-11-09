@@ -1,0 +1,21 @@
+// Sharing a model with a vendor, consultant or research partner.
+// Everything identifying goes: names, ids, descriptions, comments, titles,
+// coordinates, and PSS/E bus numbers. Add your organisation's own names
+// (and abbreviations) to redactTerms so they can't survive in free text.
+{
+  "name": "vendor-strict",
+  "description": "Maximum removal for models leaving the organisation.",
+  "redactTerms": [ "Your Utility Name", "YUN" ],
+  "cim": {
+    "stripComments": true,
+    "replaceHeaders": true,
+    "keepTypeHints": false
+  },
+  "psse": {
+    "renumberBuses": true,
+    "busNumberStrategy": "shuffled",
+    "zeroCoordinates": true,
+    "replaceCaseTitle": true,
+    "stripComments": true
+  }
+}

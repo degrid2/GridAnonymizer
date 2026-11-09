@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The engine. Zero package dependencies: only the .NET base class library. -->
+  <PropertyGroup>
+    <RootNamespace>GridAnonymizer</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>GridAnonymizer.Core</PackageId>
+    <Description>Deterministic, format-preserving anonymization of power-system network models (CIM/CGMES RDF-XML, PSS/E RAW). No dependencies beyond the .NET base class library.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <InternalsVisibleTo Include="GridAnonymizer.Tests" />
+  </ItemGroup>
+</Project>

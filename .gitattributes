@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.cs text diff=csharp
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# byte-exact fixtures and generated assets
+dotnet/tests/golden/** -text
+web/test/golden/** -text
+dotnet/src/GridAnonymizer.Cli/wwwroot/** -text

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Test-only dependencies. Nothing here ships to users. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <NoWarn>$(NoWarn);CA1707;CA2007;CA1861</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <ProjectReference Include="../../src/GridAnonymizer.Core/GridAnonymizer.Core.csproj" />
+    <ProjectReference Include="../../src/GridAnonymizer.Cli/GridAnonymizer.Cli.csproj" />
+    <None Include="../../samples/**/*" LinkBase="samples" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../golden/**/*" LinkBase="TestData" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

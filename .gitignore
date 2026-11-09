@@ -1,0 +1,32 @@
+# .NET
+bin/
+obj/
+dotnet/out/
+publish/
+artifacts/
+*.user
+*.suo
+.vs/
+TestResults/
+
+# TypeScript
+node_modules/
+web/dist/
+web/dist-cli/
+web/dist-dotnet/
+
+# editors
+.vscode/
+.idea/
+*.partial
+
+# Never commit real models or mappings
+anonymized/
+restored/
+private/
+*map*.json
+!**/samples/**
+!**/profiles/**
+
+# local scratch
+_to_delete/

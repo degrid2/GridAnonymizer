@@ -1,0 +1,13 @@
+// CGMES IGMs that reference the public ENTSO-E boundary set.
+// Ids that are referenced but not declared in your files (boundary
+// ConnectivityNodes, TopologicalNodes, BaseVoltages) are kept, and boundary
+// node names (X-nodes) are preserved, so the anonymized model still merges
+// with the official boundary set.
+{
+  "name": "cgmes-boundary",
+  "description": "Anonymize an IGM but keep everything that ties it to the ENTSO-E boundary set.",
+  "preserveNames": [ "^X[A-Z0-9_-]{4,}$" ],
+  "cim": {
+    "anonymizeExternalReferences": false
+  }
+}

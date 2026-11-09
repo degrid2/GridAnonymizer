@@ -1,0 +1,17 @@
+// Internal test data: hide human-readable names but keep ids, mRIDs and bus
+// numbers stable, so the model still lines up with SCADA point lists,
+// historian tags and existing study scripts.
+{
+  "name": "names-only",
+  "description": "Rename names and descriptions only; keep ids, mRIDs and bus numbers.",
+  "cim": {
+    "anonymizeIds": false,
+    "anonymizeMrids": false,
+    "stripComments": true
+  },
+  "psse": {
+    "renumberBuses": false,
+    "stripComments": true,
+    "replaceCaseTitle": true
+  }
+}

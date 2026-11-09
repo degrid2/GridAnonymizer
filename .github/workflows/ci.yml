@@ -1,0 +1,111 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet:
+    name: .NET edition (${{ matrix.rid }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  rid: linux-x64, exe: gridanon }
+          - { os: windows-latest, rid: win-x64,   exe: gridanon.exe }
+          - { os: macos-latest,   rid: osx-arm64, exe: gridanon }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: dotnet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: dotnet/global.json
+      - run: dotnet test -c Release
+      - run: dotnet format --verify-no-changes
+      - run: dotnet publish src/GridAnonymizer.Cli -c Release -r ${{ matrix.rid }} -o out
+      - name: CLI smoke test
+        run: |
+          ./out/${{ matrix.exe }} anonymize samples/cim samples/psse --renumber-buses --salt ci -o anon -m anon/map.json
+          ./out/${{ matrix.exe }} restore anon/study_results_anonymized.csv --mapping anon/map.json -o back
+          diff <(tr -d '\r' < samples/psse/study_results.csv) <(tr -d '\r' < back/study_results_anonymized_restored.csv)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gridanon-${{ matrix.rid }}
+          path: dotnet/out/${{ matrix.exe }}
+
+  web:
+    name: TypeScript edition (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Browser smoke test
+        if: runner.os == 'Linux'
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:browser
+
+  # The two editions must agree byte for byte, and the copies they share must not drift.
+  cross-edition:
+    needs: dotnet
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  rid: linux-x64, exe: gridanon }
+          - { os: windows-latest, rid: win-x64,   exe: gridanon.exe }
+          - { os: macos-latest,   rid: osx-arm64, exe: gridanon }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: gridanon-${{ matrix.rid }}
+          path: bin
+      - run: chmod +x ../bin/${{ matrix.exe }} || true
+      - run: npm ci
+      - name: Shared copies and the .NET UI are in sync
+        if: runner.os == 'Linux'
+        run: |
+          npx vite build --mode dotnet
+          node ../.github/scripts/check-sync.mjs
+      - name: Parity (TypeScript vs .NET)
+        run: GRIDANON_DOTNET=../bin/${{ matrix.exe }} npm run test:parity
+      - name: Browser smoke test incl. gridanon ui
+        if: runner.os == 'Linux'
+        run: |
+          npm run build
+          npx playwright install --with-deps chromium
+          GRIDANON_DOTNET=../bin/${{ matrix.exe }} npm run test:browser
