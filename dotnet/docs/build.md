@@ -20,6 +20,8 @@ winget install Microsoft.DotNet.SDK.10        # Windows, side by side with Visua
 ```
 Open a new terminal afterwards. Inside this folder, `dotnet --version` should report 10.0.403 or later.
 
+**Shortcut:** from the repository root, `./build.sh dotnet` (Linux, macOS) or `.\build.ps1 dotnet` (Windows) checks the prerequisites and builds this edition. Add `--native`/`-Native` for the native executable, `--test`/`-Test` to run the tests. Leave out `dotnet` to build both editions.
+
 ## Build and run from source
 
 Run everything from this folder (the one containing `GridAnonymizer.slnx`):

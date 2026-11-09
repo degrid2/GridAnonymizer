@@ -1,6 +1,6 @@
 # Adding a format: TypeScript edition
 
-1. Create `src/core/<name>.ts` exporting a `FormatHandler` (`id`, `description`, `extensions`, `encoding`, `sniff(head)`, `createJob(ctx)`).
+1. Create `src/core/<name>.ts` exporting a `FormatHandler` (`id`, `description`, `extensions`, `encoding`, `sniff(head)`, `createJob(ctx)`, and optionally `phase`: 0 for a model, 1 for a file that follows a model in the same run and reads `ctx.mapping`, like `psse-aux.ts`, 2 for free text).
 2. Implement `FormatJob`:
    - `scan(source)`: inventory identifying values (called for every file before any rewrite)
    - `buildMaps()`: create pseudonyms. Honour `ctx.mapping` (continue) and `ctx.restore` (invert).

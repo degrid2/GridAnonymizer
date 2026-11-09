@@ -8,7 +8,7 @@ Do not attach customer, utility or TSO models to issues, pull requests or test d
 
 ## Two editions
 
-`dotnet/` and `web/` are self-contained: each builds, tests and documents itself without the other. Their build, run and test guides are in `dotnet/docs/` and `web/docs/`.
+`dotnet/` and `web/` are self-contained: each builds, tests and documents itself without the other. Their build, run and test guides are in `dotnet/docs/` and `web/docs/`. To build and test both from the root: `./build.sh --test` (Linux, macOS) or `.\build.ps1 -Test` (Windows); this also runs the parity test.
 
 They are also **twins**: the same inputs and salt produce byte-identical output. CI enforces this with a parity test, so:
 

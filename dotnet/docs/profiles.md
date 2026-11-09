@@ -44,12 +44,12 @@ Command-line flags override the profile: `--renumber-buses`, `--keep-comments`, 
 
 | Field | Default | Meaning |
 |---|---|---|
-| `anonymizeNames` | `true` | rename every quoted name field |
+| `anonymizeNames` | `true` | rename every quoted name field, and labels in `.con`/`.mon`/`.sub`/`.aux` files |
 | `replaceCaseTitle` / `caseTitle` | `true` / `ANONYMIZED CASE` | the two title lines |
-| `stripComments` | `true` | drop `/` comments (section labels such as `END OF BUS DATA` are kept) and anything after `Q` |
-| `renumberBuses` | `false` | renumber buses in every referencing field |
+| `stripComments` | `true` | drop `/` comments (section labels such as `END OF BUS DATA` are kept) and anything after `Q`; in companion files, `COM` lines and `/` comments |
+| `renumberBuses` | `false` | renumber buses in every referencing field, and in companion files of the same run |
 | `busNumberStrategy` | `shuffled` | or `sequential` |
 | `busNumberStart` | `1` | |
 | `zeroCoordinates` | `true` | substation latitude/longitude (rev 34+) |
-| `keepStringPatterns` | ids of 2 characters or fewer, vector groups | quoted strings that are data, not names |
+| `keepStringPatterns` | ids of 2 characters or fewer, vector groups | quoted strings that are data, not names (companion-file labels too) |
 | `namePrefixes` | `bus: BUS`, `branch: BR`, `transformer: XF`, ... | keep them short, since PSS/E names are at most 12 characters |

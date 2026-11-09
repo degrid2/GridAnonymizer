@@ -4,6 +4,7 @@
    - `Id`: the short name for `--format`
    - `Sniff(head)`: true when the first 16 KB look like your format
    - `CreateJob(context)`: return your `IFormatJob`
+   - `Phase` (optional): `0` for a model (default), `1` for a file that follows a model in the same run and reads `context.Mapping` (like the PSS®E companion handler, `Formats/Psse/PsseAuxHandler.cs`), `2` for free text
 2. Implement `IFormatJob`:
    - `Scan(path)`: inventory identifying values (called for every file before any rewrite)
    - `BuildMaps()`: create pseudonyms. Honour `context.Mapping` (continue a previous run) and `context.Restore` (invert it).

@@ -9,6 +9,8 @@
 
 Install Node: https://nodejs.org, `winget install OpenJS.NodeJS.LTS`, or `brew install node`.
 
+**Shortcut:** from the repository root, `./build.sh web` (Linux, macOS) or `.\build.ps1 web` (Windows) checks the prerequisites, runs `npm ci` when needed and builds everything below. Add `--test`/`-Test` to run the tests. Leave out `web` to build both editions; the page for `gridanon ui` is then refreshed too.
+
 ## Build
 
 From this folder:

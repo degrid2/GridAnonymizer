@@ -6,19 +6,21 @@ index.html + src/app/main.ts      the page (framework-free; user text only via t
         ├─ backend-worker.ts  →  worker.ts  →  src/core   browser build: engine in a Web Worker
         └─ backend-server.ts  →  HTTP to `gridanon ui`     dotnet build: the .NET engine does the work
 cli/gridanon.ts  →  src/core                               Node CLI
-src/core: engine.ts · cim.ts · psse.ts · text.ts · profile.ts · mapping.ts · hash.ts · shared.ts · xml-chunker.ts
+src/core: engine.ts · cim.ts · psse.ts · psse-aux.ts · text.ts · zip.ts · profile.ts · mapping.ts · hash.ts · shared.ts · xml-chunker.ts
 ```
 
 The core performs no I/O itself: inputs are re-openable `ByteSource`s and outputs `OutputTarget`s, adapted to `File`/Blob/File System Access in the browser (`src/app/browser-io.ts`) and to `fs` in Node (`cli/node-io.ts`).
 
 ## A run
 
+0. **Unpack:** a `.zip` (dropped on the page, or given to the CLI) is read entry by entry with `zip.ts` (streaming, no dependencies; zip slip refused). Each entry keeps its folder as `InputFile.relativeDirectory`.
 1. **Detect:** sniff the first 16 KB, then the extension.
-2. **Group:** by format; structured formats first, `text` last so it reuses the names just mapped.
+2. **Group:** by format, run in phases (`FormatHandler.phase`): 0 models (CIM, PSS®E RAW), 1 PSS®E companions (`.con .mon .sub .aux`, `psse-aux.ts`), 2 `text`. Later phases see the mapping built so far, so companions follow the case and CSVs reuse every name and label.
 3. **Scan (pass 1):** inventory ids, names, references and vocabulary of every file in the group.
 4. **Build maps:** one mapping per group, seeded by *continue from a mapping*.
 5. **Rewrite (pass 2):** stream each file, replace identity tokens only, keep every other byte.
 6. **Audit:** re-read each output and hunt for original names, ids and redact terms; check PSS®E bus references.
+7. **Package:** outputs keep their folders. The page's worker zips them in memory (`zipToBlob`); the CLI writes `<name>_anonymized.zip`, or one `--zip` archive, through a temp folder it deletes afterwards.
 
 Pseudonyms are HMAC-SHA256(salt, …). SHA-256/HMAC are implemented in `hash.ts` (pure and synchronous) so the browser, Node and the .NET edition agree exactly. The rules themselves are described in [formats/cim.md](formats/cim.md) and [formats/psse.md](formats/psse.md).
 
