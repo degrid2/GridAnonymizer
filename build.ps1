@@ -10,6 +10,7 @@
                   `gridanon ui` from it, then .NET, so both run the same UI.
 
   Works in Windows PowerShell 5.1 and PowerShell 7 on Windows, Linux and macOS.
+  On Linux and macOS without PowerShell, use ./build.sh (same options).
 
 .EXAMPLE
   .\build.ps1                         # both editions

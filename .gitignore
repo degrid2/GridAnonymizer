@@ -23,6 +23,7 @@ web/dist-dotnet/
 # Never commit real models or mappings
 anonymized/
 restored/
+gridanon-output/
 private/
 *map*.json
 !**/samples/**
